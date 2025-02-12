@@ -3,21 +3,24 @@ import blpapi
 import pandas as pd
 from datetime import datetime
 import logging
+from utils import retry_with_notification
+from config import Config
 
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    filename=f'bloomberg_terminal_yields_{datetime.now().strftime("%Y%m%d")}.log'
+    filename=Config.get_logs_path() / f'bloomberg_terminal_yields_{datetime.now().strftime("%Y%m%d")}.log'
 )
 
+@retry_with_notification()
 def init_bloomberg_terminal():
     """Initialize Bloomberg Terminal API session"""
     try:
         # Initialize SessionOptions for Terminal
         session_options = blpapi.SessionOptions()
-        session_options.setServerHost("localhost")  # Terminal always uses localhost
-        session_options.setServerPort(8194)  # Default Terminal port
+        session_options.setServerHost(Config.BLOOMBERG_HOST)
+        session_options.setServerPort(Config.BLOOMBERG_PORT)
         
         # Create a Session
         session = blpapi.Session(session_options)
@@ -38,6 +41,7 @@ def init_bloomberg_terminal():
         logging.error(f"Error initializing Bloomberg Terminal session: {str(e)}")
         raise
 
+@retry_with_notification()
 def get_bond_yields(session, bonds):
     """Fetch yield values for the given bonds"""
     try:
@@ -101,10 +105,12 @@ def get_bond_yields(session, bonds):
         logging.error(f"Error fetching bond yields: {str(e)}")
         raise
 
-def main():
+def run_terminal_workflow():
+    """Run the complete Bloomberg Terminal workflow"""
+    session = None
     try:
         # Load bonds from JSON file
-        with open('bonds.json', 'r') as f:
+        with open(Config.BONDS_JSON_PATH, 'r') as f:
             bonds = json.load(f)
         
         logging.info(f"Loaded {len(bonds)} bonds from bonds.json")
@@ -117,20 +123,18 @@ def main():
         
         # Convert to DataFrame and save to CSV
         df = pd.DataFrame(results)
-        output_file = f'bond_yields_terminal_{datetime.now().strftime("%Y%m%d")}.csv'
+        output_file = Config.get_output_path('bloomberg') / f'bond_yields_terminal_{datetime.now().strftime("%Y%m%d")}.csv'
         df.to_csv(output_file, index=False)
         
         logging.info(f"Successfully saved yields to {output_file}")
-        
-        # Print results
-        print(df)
+        return True
         
     except Exception as e:
-        logging.error(f"Error in main execution: {str(e)}")
-        raise
+        logging.error(f"Error in Bloomberg Terminal workflow: {str(e)}")
+        return False
     finally:
-        if 'session' in locals():
+        if session:
             session.stop()
 
 if __name__ == "__main__":
-    main()
+    run_terminal_workflow()

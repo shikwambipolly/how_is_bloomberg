@@ -1,37 +1,28 @@
 from O365 import Account
 import pandas as pd
 import io
-import json
-import os
 from datetime import datetime, timedelta
 import logging
+from utils import retry_with_notification
+from config import Config
 
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    filename=f'nsx_email_fetch_{datetime.now().strftime("%Y%m%d")}.log'
+    filename=Config.get_logs_path() / f'nsx_email_fetch_{datetime.now().strftime("%Y%m%d")}.log'
 )
 
 class NSXEmailProcessor:
     def __init__(self):
-        # Load credentials from environment variables
-        self.client_id = os.getenv('O365_CLIENT_ID')
-        self.client_secret = os.getenv('O365_CLIENT_SECRET')
-        
-        if not all([self.client_id, self.client_secret]):
-            raise ValueError(
-                "Missing Microsoft 365 credentials. Please set environment variables: "
-                "O365_CLIENT_ID, O365_CLIENT_SECRET"
-            )
-        
         # Initialize the O365 Account
-        self.account = Account((self.client_id, self.client_secret))
+        self.account = Account((Config.O365_CLIENT_ID, Config.O365_CLIENT_SECRET))
         
         # Ensure we're authenticated
         if not self.account.is_authenticated:
             self.authenticate()
     
+    @retry_with_notification()
     def authenticate(self):
         """Authenticate with Microsoft 365"""
         try:
@@ -43,6 +34,7 @@ class NSXEmailProcessor:
             logging.error(f"Authentication error: {str(e)}")
             raise
     
+    @retry_with_notification()
     def get_latest_nsx_email(self):
         """Get the latest email from NSX"""
         try:
@@ -70,8 +62,7 @@ class NSXEmailProcessor:
                     latest_time = message.received
             
             if not latest_message:
-                logging.warning("No NSX emails found in the last 12 hours")
-                return None
+                raise ValueError("No NSX emails found in the last 12 hours")
             
             logging.info(f"Found latest NSX email from {latest_time}")
             return latest_message
@@ -80,6 +71,7 @@ class NSXEmailProcessor:
             logging.error(f"Error fetching NSX email: {str(e)}")
             raise
     
+    @retry_with_notification()
     def download_nsx_report(self, message):
         """Download the NSX Daily Report attachment"""
         try:
@@ -93,8 +85,7 @@ class NSXEmailProcessor:
                     logging.info(f"Successfully downloaded attachment: {attachment.name}")
                     return excel_data
             
-            logging.warning("No NSX Daily Report attachment found in the email")
-            return None
+            raise ValueError("No NSX Daily Report attachment found in the email")
             
         except Exception as e:
             logging.error(f"Error downloading attachment: {str(e)}")
@@ -124,7 +115,7 @@ class NSXEmailProcessor:
     def save_bonds_data(self, df):
         """Save the bonds data to CSV"""
         try:
-            output_file = f'nsx_bonds_{datetime.now().strftime("%Y%m%d")}.csv'
+            output_file = Config.get_output_path('nsx') / f'nsx_bonds_{datetime.now().strftime("%Y%m%d")}.csv'
             df.to_csv(output_file, index=False)
             logging.info(f"Successfully saved bonds data to {output_file}")
             return output_file
@@ -132,22 +123,17 @@ class NSXEmailProcessor:
             logging.error(f"Error saving bonds data: {str(e)}")
             raise
 
-def main():
+def run_nsx_workflow():
+    """Run the complete NSX email workflow"""
     try:
         # Initialize processor
         processor = NSXEmailProcessor()
         
         # Get latest NSX email
         latest_email = processor.get_latest_nsx_email()
-        if not latest_email:
-            logging.error("No NSX email found")
-            return
         
         # Download the report
         excel_data = processor.download_nsx_report(latest_email)
-        if not excel_data:
-            logging.error("No NSX Daily Report found in the email")
-            return
         
         # Process the bonds data
         df = processor.process_bonds_data(excel_data)
@@ -155,13 +141,12 @@ def main():
         # Save to CSV
         output_file = processor.save_bonds_data(df)
         
-        print(f"Successfully processed NSX bonds data and saved to {output_file}")
-        print("\nFirst few rows of the data:")
-        print(df.head())
+        logging.info(f"Successfully completed NSX workflow")
+        return True
         
     except Exception as e:
-        logging.error(f"Error in main execution: {str(e)}")
-        raise
+        logging.error(f"Error in NSX workflow: {str(e)}")
+        return False
 
 if __name__ == "__main__":
-    main()
+    run_nsx_workflow()
