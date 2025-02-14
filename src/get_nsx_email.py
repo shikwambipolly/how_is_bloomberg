@@ -112,49 +112,60 @@ class NSXEmailProcessor:
             attachments = list(message.attachments)
             logging.info(f"Found {len(attachments)} attachments")
             
-            # Debug: Print all attachment names
+            # Debug: Print all attachment names and details
             for idx, attachment in enumerate(attachments):
-                logging.info(f"Attachment {idx + 1}: {attachment.name}")
+                logging.info(f"Attachment {idx + 1}:")
+                logging.info(f"  - Name: {attachment.name}")
+                logging.info(f"  - Size: {len(attachment.content) if attachment.content else 'Unknown'} bytes")
+                logging.info(f"  - Type: {type(attachment)}")
             
             # Look for NSX Daily Report
             for attachment in attachments:
                 if attachment.name and "NSX Daily Report" in attachment.name:
                     logging.info(f"Found NSX Daily Report attachment: {attachment.name}")
                     
-                    # First try to save the file to disk temporarily
+                    # Create temp directory if it doesn't exist
                     temp_dir = Config.get_output_path('temp')
                     temp_file = temp_dir / f"temp_nsx_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
                     
                     try:
-                        # Get the attachment bytes
-                        content = attachment.bytes
-                        if content is None:
-                            logging.error("Attachment content is None")
-                            continue
+                        # Try to get the content directly from the attachment object
+                        if hasattr(attachment, 'content') and attachment.content:
+                            content = attachment.content
+                            if isinstance(content, str):
+                                content = content.encode('utf-8')
+                        else:
+                            # Fallback to bytes attribute
+                            content = attachment.bytes
+                        
+                        if not content:
+                            raise ValueError("No content found in attachment")
+                        
+                        # Log content details for debugging
+                        logging.info(f"Content size: {len(content)} bytes")
+                        logging.info(f"Content type: {type(content)}")
                         
                         # Save to temporary file
                         with open(temp_file, 'wb') as f:
                             f.write(content)
                         
-                        logging.info(f"Successfully saved temporary file: {temp_file}")
+                        # Verify file was created and has content
+                        if not temp_file.exists():
+                            raise FileNotFoundError(f"Failed to create file: {temp_file}")
+                        
+                        file_size = temp_file.stat().st_size
+                        logging.info(f"Successfully saved temporary file: {temp_file} (Size: {file_size} bytes)")
+                        
+                        if file_size == 0:
+                            raise ValueError("File was created but is empty")
+                        
                         return temp_file
                         
                     except Exception as e:
-                        logging.error(f"Error saving attachment content: {str(e)}")
-                        # Try alternative method
-                        try:
-                            content = attachment.content
-                            if isinstance(content, str):
-                                content = content.encode('utf-8')
-                            with open(temp_file, 'wb') as f:
-                                f.write(content)
-                            logging.info(f"Successfully saved temporary file using alternative method: {temp_file}")
-                            return temp_file
-                        except Exception as e2:
-                            logging.error(f"Alternative method also failed: {str(e2)}")
-                            if temp_file.exists():
-                                temp_file.unlink()  # Delete the temp file if it exists
-                            continue
+                        logging.error(f"Error handling attachment: {str(e)}")
+                        if temp_file.exists():
+                            temp_file.unlink()
+                        raise
             
             # If we get here, we didn't find the right attachment
             logging.error("Available attachments:")
@@ -171,26 +182,45 @@ class NSXEmailProcessor:
         try:
             logging.info(f"Attempting to read Excel file from: {excel_path}")
             
-            # Read the Excel file
+            # Verify file exists and has content
+            if not excel_path.exists():
+                raise FileNotFoundError(f"Excel file not found: {excel_path}")
+            
+            file_size = excel_path.stat().st_size
+            logging.info(f"Excel file size: {file_size} bytes")
+            
+            if file_size == 0:
+                raise ValueError("Excel file is empty")
+            
+            # Try to read the file and get available sheets
             try:
-                df = pd.read_excel(
-                    excel_path,
-                    sheet_name="Bonds-Trading ATS",
-                    engine='openpyxl'
-                )
+                # First try to list available sheets
+                xls = pd.ExcelFile(excel_path, engine='openpyxl')
+                logging.info(f"Available sheets in Excel file: {xls.sheet_names}")
+                
+                # Read the specific sheet
+                df = pd.read_excel(xls, sheet_name="Bonds-Trading ATS")
+                xls.close()
+                
             except Exception as e:
-                logging.error(f"Error reading Excel file with openpyxl: {str(e)}")
-                # Try with xlrd engine as fallback
-                logging.info("Trying with xlrd engine...")
-                df = pd.read_excel(
-                    excel_path,
-                    sheet_name="Bonds-Trading ATS",
-                    engine='xlrd'
-                )
+                logging.error(f"Error reading with openpyxl: {str(e)}")
+                try:
+                    # Try reading with xlrd
+                    xls = pd.ExcelFile(excel_path, engine='xlrd')
+                    logging.info(f"Available sheets (xlrd): {xls.sheet_names}")
+                    
+                    df = pd.read_excel(xls, sheet_name="Bonds-Trading ATS")
+                    xls.close()
+                    
+                except Exception as e2:
+                    logging.error(f"Error reading with xlrd: {str(e2)}")
+                    # Try one last time with a direct read
+                    df = pd.read_excel(excel_path)
+                    logging.info("Successfully read file with default engine")
             
             # Basic data validation
             if df.empty:
-                raise ValueError("No data found in the Bonds-Trading ATS sheet")
+                raise ValueError("No data found in the Excel sheet")
             
             logging.info(f"Successfully processed bonds data. Found {len(df)} rows")
             logging.info(f"Columns found: {df.columns.tolist()}")
