@@ -51,7 +51,7 @@ def send_error_email(error_message, source):
     except Exception as e:
         logging.error(f"Failed to send error email: {str(e)}")
 
-def retry_with_notification(max_retries=3, delay_minutes=15):
+def retry_with_notification(max_retries=3, delay_minutes=0.05):
     """Decorator for retrying functions with delay and email notification"""
     def decorator(func):
         @wraps(func)

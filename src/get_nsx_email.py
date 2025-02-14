@@ -7,6 +7,7 @@ from utils import retry_with_notification
 from config import Config
 from workflow_result import WorkflowResult
 import pytz  # Library for handling timezones
+from pathlib import Path
 
 # Set up logging
 logging.basicConfig(
@@ -120,6 +121,10 @@ class NSXEmailProcessor:
                 if attachment.name and "NSX Daily Report" in attachment.name:
                     logging.info(f"Found NSX Daily Report attachment: {attachment.name}")
                     
+                    # First try to save the file to disk temporarily
+                    temp_dir = Config.get_output_path('temp')
+                    temp_file = temp_dir / f"temp_nsx_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                    
                     try:
                         # Get the attachment bytes
                         content = attachment.bytes
@@ -127,23 +132,28 @@ class NSXEmailProcessor:
                             logging.error("Attachment content is None")
                             continue
                         
-                        # Create BytesIO object from the binary content
-                        excel_data = io.BytesIO(content)
-                        logging.info(f"Successfully downloaded attachment: {attachment.name}")
-                        return excel_data
+                        # Save to temporary file
+                        with open(temp_file, 'wb') as f:
+                            f.write(content)
+                        
+                        logging.info(f"Successfully saved temporary file: {temp_file}")
+                        return temp_file
                         
                     except Exception as e:
-                        logging.error(f"Error getting attachment content: {str(e)}")
+                        logging.error(f"Error saving attachment content: {str(e)}")
                         # Try alternative method
                         try:
                             content = attachment.content
                             if isinstance(content, str):
                                 content = content.encode('utf-8')
-                            excel_data = io.BytesIO(content)
-                            logging.info(f"Successfully downloaded attachment using alternative method: {attachment.name}")
-                            return excel_data
+                            with open(temp_file, 'wb') as f:
+                                f.write(content)
+                            logging.info(f"Successfully saved temporary file using alternative method: {temp_file}")
+                            return temp_file
                         except Exception as e2:
                             logging.error(f"Alternative method also failed: {str(e2)}")
+                            if temp_file.exists():
+                                temp_file.unlink()  # Delete the temp file if it exists
                             continue
             
             # If we get here, we didn't find the right attachment
@@ -156,25 +166,51 @@ class NSXEmailProcessor:
             logging.error(f"Error downloading attachment: {str(e)}")
             raise
     
-    def process_bonds_data(self, excel_data):
+    def process_bonds_data(self, excel_path):
         """Process the bonds data from the Excel file"""
         try:
+            logging.info(f"Attempting to read Excel file from: {excel_path}")
+            
             # Read the Excel file
-            df = pd.read_excel(
-                excel_data,
-                sheet_name="Bonds-Trading ATS",
-                engine='openpyxl'
-            )
+            try:
+                df = pd.read_excel(
+                    excel_path,
+                    sheet_name="Bonds-Trading ATS",
+                    engine='openpyxl'
+                )
+            except Exception as e:
+                logging.error(f"Error reading Excel file with openpyxl: {str(e)}")
+                # Try with xlrd engine as fallback
+                logging.info("Trying with xlrd engine...")
+                df = pd.read_excel(
+                    excel_path,
+                    sheet_name="Bonds-Trading ATS",
+                    engine='xlrd'
+                )
             
             # Basic data validation
             if df.empty:
                 raise ValueError("No data found in the Bonds-Trading ATS sheet")
             
             logging.info(f"Successfully processed bonds data. Found {len(df)} rows")
+            logging.info(f"Columns found: {df.columns.tolist()}")
+            
+            # Clean up temporary file
+            if Path(excel_path).parent.name == 'temp':
+                Path(excel_path).unlink()
+                logging.info(f"Cleaned up temporary file: {excel_path}")
+            
             return df
             
         except Exception as e:
             logging.error(f"Error processing bonds data: {str(e)}")
+            # Clean up temporary file even if processing failed
+            if Path(excel_path).parent.name == 'temp':
+                try:
+                    Path(excel_path).unlink()
+                    logging.info(f"Cleaned up temporary file after error: {excel_path}")
+                except:
+                    pass
             raise
     
     def save_bonds_data(self, df):
@@ -198,10 +234,10 @@ def run_nsx_workflow() -> WorkflowResult:
         latest_email = processor.get_latest_nsx_email()
         
         # Download the report
-        excel_data = processor.download_nsx_report(latest_email)
+        excel_path = processor.download_nsx_report(latest_email)
         
         # Process the bonds data
-        df = processor.process_bonds_data(excel_data)
+        df = processor.process_bonds_data(excel_path)
         
         # Save to CSV
         output_file = processor.save_bonds_data(df)

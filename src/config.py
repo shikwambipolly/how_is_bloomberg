@@ -48,7 +48,11 @@ class Config:
     @classmethod
     def get_output_path(cls, data_source):
         """Get output directory path for specific data source"""
-        output_path = cls.BASE_DIR / cls.OUTPUT_DIR / data_source
+        # Special handling for temp directory to ensure it's hidden
+        if data_source == 'temp':
+            output_path = cls.OUTPUT_DIR / '.temp'
+        else:
+            output_path = cls.OUTPUT_DIR / data_source
         output_path.mkdir(parents=True, exist_ok=True)
         return output_path
 
