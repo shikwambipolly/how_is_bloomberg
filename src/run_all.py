@@ -5,9 +5,9 @@ from get_nsx_email import run_nsx_workflow
 from get_IJG_daily import run_ijg_workflow
 from utils import send_error_email
 from config import Config
-from dataclasses import dataclass
 from typing import Optional
 import pandas as pd
+from workflow_result import WorkflowResult
 
 # Set up logging
 logging.basicConfig(
@@ -15,12 +15,6 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
     filename=Config.get_logs_path() / f'master_workflow_{datetime.now().strftime("%Y%m%d")}.log'
 )
-
-@dataclass
-class WorkflowResult:
-    success: bool
-    data: Optional[pd.DataFrame] = None
-    error: Optional[str] = None
 
 class DataCollector:
     def __init__(self):

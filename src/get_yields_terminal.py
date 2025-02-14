@@ -5,7 +5,7 @@ from datetime import datetime
 import logging
 from utils import retry_with_notification
 from config import Config
-from run_all import WorkflowResult
+from workflow_result import WorkflowResult
 
 # Set up logging
 logging.basicConfig(
