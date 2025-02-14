@@ -1,43 +1,77 @@
-import pandas as pd
-import re
-import logging
-from datetime import datetime
-from utils import retry_with_notification
-from config import Config
-from workflow_result import WorkflowResult
+"""
+This module processes the IJG Daily Excel report and extracts two types of data:
+1. GI Data: Specific rows from the Yields sheet that contain GI codes
+2. GC Data: Rows 2-19 from the Spread Calc sheet
 
-# Set up logging
+The data is saved into separate CSV files with today's date in the filename.
+"""
+
+import pandas as pd  # Library for data manipulation and analysis
+import re  # Library for regular expressions (pattern matching in text)
+import logging  # Library for creating log files
+from datetime import datetime  # Library for working with dates and times
+from utils import retry_with_notification  # Custom retry mechanism
+from config import Config  # Project configuration settings
+from workflow_result import WorkflowResult  # Custom class for workflow results
+
+# Set up logging to track the program's execution
+# This creates a new log file each day with the date in the filename
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
+    level=logging.INFO,  # Log all information messages and above
+    format='%(asctime)s - %(levelname)s - %(message)s',  # Include timestamp, level, and message
     filename=Config.get_logs_path() / f'ijg_daily_{datetime.now().strftime("%Y%m%d")}.log'
 )
 
 class IJGDailyProcessor:
+    """
+    Main class for processing the IJG Daily Excel report.
+    This class handles reading the Excel file, extracting specific data,
+    and saving the results to CSV files.
+    """
+    
     def __init__(self):
+        """
+        Initialize the processor by checking if the Excel file exists.
+        Raises an error if the file is not found.
+        """
         self.excel_path = Config.IJG_DAILY_PATH
         if not self.excel_path.exists():
             raise FileNotFoundError(f"Excel file not found at path: {self.excel_path}")
     
     def _is_gi_code(self, value):
-        """Check if value matches GI followed by 2 numbers pattern"""
-        if pd.isna(value):
+        """
+        Check if a value matches the GI code pattern (GI followed by exactly 2 numbers).
+        Example: 'GI01' would match, but 'GI1' or 'GI123' would not.
+        
+        Args:
+            value: The value to check
+            
+        Returns:
+            bool: True if the value matches the GI pattern, False otherwise
+        """
+        if pd.isna(value):  # Check if the value is empty/NaN
             return False
-        pattern = r'^GI\d{2}$'
+        pattern = r'^GI\d{2}$'  # Pattern: Start with GI, followed by exactly 2 digits
         return bool(re.match(pattern, str(value).strip()))
     
-    @retry_with_notification()
+    @retry_with_notification()  # Retry this operation if it fails
     def extract_yields_data(self):
-        """Extract data from Yields sheet where column A contains GI codes"""
+        """
+        Extract data from the Yields sheet of the Excel file.
+        Only keeps rows where the first column (A) contains a GI code.
+        
+        Returns:
+            pandas.DataFrame: The extracted data containing only rows with GI codes
+        """
         try:
-            # Read the Yields sheet
+            # Read the Yields sheet from the Excel file
             df_yields = pd.read_excel(
                 self.excel_path,
                 sheet_name="Yields",
-                engine='openpyxl'
+                engine='openpyxl'  # Use openpyxl engine for .xlsx files
             )
             
-            # Filter rows where column A contains GI codes
+            # Filter rows where the first column contains GI codes
             gi_rows = df_yields[df_yields.iloc[:, 0].apply(self._is_gi_code)]
             
             if gi_rows.empty:
@@ -50,18 +84,24 @@ class IJGDailyProcessor:
             logging.error(f"Error extracting Yields data: {str(e)}")
             raise
     
-    @retry_with_notification()
+    @retry_with_notification()  # Retry this operation if it fails
     def extract_spread_data(self):
-        """Extract rows 2-19 from Spread Calc sheet"""
+        """
+        Extract rows 2-19 from the Spread Calc sheet of the Excel file.
+        These rows contain specific spread calculation data.
+        
+        Returns:
+            pandas.DataFrame: The extracted rows from the Spread Calc sheet
+        """
         try:
-            # Read the Spread Calc sheet
+            # Read the Spread Calc sheet from the Excel file
             df_spread = pd.read_excel(
                 self.excel_path,
                 sheet_name="Spread Calc",
                 engine='openpyxl'
             )
             
-            # Extract rows 2-19 (1-18 in 0-based index)
+            # Extract rows 2-19 (index 1-18 since Python uses 0-based indexing)
             spread_rows = df_spread.iloc[1:19].copy()
             
             if spread_rows.empty:
@@ -74,60 +114,74 @@ class IJGDailyProcessor:
             logging.error(f"Error extracting Spread Calc data: {str(e)}")
             raise
     
-    def combine_data(self, yields_data, spread_data):
-        """Combine data from both sheets into one DataFrame"""
+    def save_data(self, df: pd.DataFrame, data_type: str) -> str:
+        """
+        Save the extracted data to a CSV file.
+        The filename includes the data type (GI or GC) and today's date.
+        
+        Args:
+            df: The data to save
+            data_type: Type of data ('GI' or 'GC')
+            
+        Returns:
+            str: Path to the saved CSV file
+        """
         try:
-            # Add source column to each DataFrame
-            yields_data = yields_data.assign(Source='Yields')
-            spread_data = spread_data.assign(Source='Spread Calc')
+            # Create filename with format: ijg_<type>_YYYYMMDD.csv
+            filename = f'ijg_{data_type}_{datetime.now().strftime("%Y%m%d")}.csv'
+            output_file = Config.get_output_path('ijg') / filename
             
-            # Combine the DataFrames
-            combined_df = pd.concat([yields_data, spread_data], ignore_index=True)
-            
-            logging.info(f"Successfully combined data: {len(combined_df)} total rows")
-            return combined_df
-            
-        except Exception as e:
-            logging.error(f"Error combining data: {str(e)}")
-            raise
-    
-    def save_data(self, df):
-        """Save the extracted data to CSV"""
-        try:
-            output_file = Config.get_output_path('ijg') / f'ijg_bonds_{datetime.now().strftime("%Y%m%d")}.csv'
+            # Save to CSV file
             df.to_csv(output_file, index=False)
-            logging.info(f"Successfully saved data to {output_file}")
+            logging.info(f"Successfully saved {data_type} data to {output_file}")
             return output_file
+            
         except Exception as e:
-            logging.error(f"Error saving data: {str(e)}")
+            logging.error(f"Error saving {data_type} data: {str(e)}")
             raise
 
 def run_ijg_workflow() -> WorkflowResult:
-    """Run the complete IJG workflow"""
+    """
+    Main function to run the complete IJG workflow:
+    1. Initialize the processor
+    2. Extract both types of data (GI and GC)
+    3. Save each dataset to its own CSV file
+    4. Return the results
+    
+    Returns:
+        WorkflowResult: Object containing success status and the extracted data
+    """
     try:
-        # Initialize processor
+        # Create processor instance
         processor = IJGDailyProcessor()
         
-        # Extract data from both sheets
-        yields_data = processor.extract_yields_data()
-        spread_data = processor.extract_spread_data()
+        # Extract both types of data
+        yields_data = processor.extract_yields_data()  # Get GI data
+        spread_data = processor.extract_spread_data()  # Get GC data
         
-        # Combine the data
-        combined_df = processor.combine_data(yields_data, spread_data)
+        # Save each dataset to its own CSV file
+        gi_file = processor.save_data(yields_data, 'GI')
+        gc_file = processor.save_data(spread_data, 'GC')
         
-        # Save to CSV
-        output_file = processor.save_data(combined_df)
+        # Return both datasets in a dictionary
+        result_data = {
+            'yields': yields_data,
+            'spread': spread_data
+        }
         
         logging.info(f"Successfully completed IJG workflow")
-        return WorkflowResult(success=True, data=combined_df)
+        return WorkflowResult(success=True, data=result_data)
         
     except Exception as e:
         error_msg = f"Error in IJG workflow: {str(e)}"
         logging.error(error_msg)
         return WorkflowResult(success=False, error=error_msg)
 
+# This section only runs if you execute this file directly (not when imported)
 if __name__ == "__main__":
     result = run_ijg_workflow()
     if result.success:
-        print("IJG data preview:")
-        print(result.data.head())
+        print("\nIJG GI data preview:")
+        print(result.data['yields'].head())
+        print("\nIJG GC data preview:")
+        print(result.data['spread'].head())

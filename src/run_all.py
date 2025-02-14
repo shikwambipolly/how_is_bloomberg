@@ -20,7 +20,8 @@ class DataCollector:
     def __init__(self):
         self.bloomberg_data: Optional[pd.DataFrame] = None
         self.nsx_data: Optional[pd.DataFrame] = None
-        self.ijg_data: Optional[pd.DataFrame] = None
+        self.ijg_yields_data: Optional[pd.DataFrame] = None
+        self.ijg_spread_data: Optional[pd.DataFrame] = None
         self.workflow_status = {
             'bloomberg': False,
             'nsx': False,
@@ -35,10 +36,21 @@ class DataCollector:
             elif source == 'nsx':
                 self.nsx_data = result.data
             elif source == 'ijg':
-                self.ijg_data = result.data
+                # Handle dictionary of dataframes for IJG
+                if isinstance(result.data, dict):
+                    self.ijg_yields_data = result.data.get('yields')
+                    self.ijg_spread_data = result.data.get('spread')
+                    if self.ijg_yields_data is not None and self.ijg_spread_data is not None:
+                        logging.info(f"Successfully stored IJG yields data with {len(self.ijg_yields_data)} rows")
+                        logging.info(f"Successfully stored IJG spread data with {len(self.ijg_spread_data)} rows")
+                    else:
+                        logging.error("Missing yields or spread data in IJG result")
+                        self.workflow_status[source] = False
+                        return
             
             self.workflow_status[source] = True
-            logging.info(f"Successfully stored {source} data with {len(result.data)} rows")
+            if source != 'ijg':  # Already logged IJG data above
+                logging.info(f"Successfully stored {source} data with {len(result.data)} rows")
         else:
             self.workflow_status[source] = False
             logging.error(f"Failed to store {source} data: {result.error}")
@@ -56,7 +68,8 @@ class DataCollector:
         return {
             'bloomberg': self.bloomberg_data,
             'nsx': self.nsx_data,
-            'ijg': self.ijg_data
+            'ijg_yields': self.ijg_yields_data,
+            'ijg_spread': self.ijg_spread_data
         }
 
 def ensure_output_directory():
@@ -146,7 +159,8 @@ if __name__ == "__main__":
         # Example: Access individual DataFrames
         bloomberg_df = collector.bloomberg_data
         nsx_df = collector.nsx_data
-        ijg_df = collector.ijg_data
+        ijg_yields_df = collector.ijg_yields_data
+        ijg_spread_df = collector.ijg_spread_data
         
         # Now you can work with the DataFrames as needed
         # For example:
@@ -158,6 +172,10 @@ if __name__ == "__main__":
             print("\nNSX Data Preview:")
             print(nsx_df.head())
         
-        if ijg_df is not None:
-            print("\nIJG Data Preview:")
-            print(ijg_df.head()) 
+        if ijg_yields_df is not None:
+            print("\nIJG Yields Data Preview:")
+            print(ijg_yields_df.head())
+        
+        if ijg_spread_df is not None:
+            print("\nIJG Spread Data Preview:")
+            print(ijg_spread_df.head()) 

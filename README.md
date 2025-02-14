@@ -23,10 +23,9 @@ This system automates the daily collection of bond data from three distinct sour
 
 3. **IJG Daily Report**
    - Processes daily IJG Excel report
-   - Extracts specific bond data:
-     - Rows with GI codes from "Yields" sheet
-     - Rows 2-19 from "Spread Calc" sheet
-   - Combines data with source tracking
+   - Extracts and saves two separate datasets:
+     - GI data: Rows with GI codes from "Yields" sheet (saved as `ijg_GI_YYYYMMDD.csv`)
+     - GC data: Rows 2-19 from "Spread Calc" sheet (saved as `ijg_GC_YYYYMMDD.csv`)
 
 ### Key Features
 
@@ -155,7 +154,12 @@ python src/get_IJG_daily.py       # IJG only
 
 ### Output
 Each workflow generates:
-1. CSV data files in respective output directories
+1. CSV data files in respective output directories:
+   - Bloomberg: `bond_yields_terminal_YYYYMMDD.csv`
+   - NSX: `nsx_bonds_YYYYMMDD.csv`
+   - IJG: Two separate files:
+     - `ijg_GI_YYYYMMDD.csv` (GI codes data)
+     - `ijg_GC_YYYYMMDD.csv` (Spread calculation data)
 2. Detailed log files
 3. Error notifications (if needed)
 
