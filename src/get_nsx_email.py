@@ -63,7 +63,7 @@ class NSXEmailProcessor:
             
             # Get current time in UTC
             now = datetime.now(pytz.UTC)
-            time_threshold = now - timedelta(hours=12)
+            time_threshold = now - timedelta(hours=24)
             
             # Query for emails from NSX in the last 12 hours
             query = nsx_folder.new_query()
@@ -120,16 +120,31 @@ class NSXEmailProcessor:
                 if attachment.name and "NSX Daily Report" in attachment.name:
                     logging.info(f"Found NSX Daily Report attachment: {attachment.name}")
                     
-                    # Get the attachment content
-                    content = attachment.content
-                    if content is None:
-                        logging.error("Attachment content is None")
-                        continue
-                    
-                    # Create BytesIO object from the content
-                    excel_data = io.BytesIO(content)
-                    logging.info(f"Successfully downloaded attachment: {attachment.name}")
-                    return excel_data
+                    try:
+                        # Get the attachment bytes
+                        content = attachment.bytes
+                        if content is None:
+                            logging.error("Attachment content is None")
+                            continue
+                        
+                        # Create BytesIO object from the binary content
+                        excel_data = io.BytesIO(content)
+                        logging.info(f"Successfully downloaded attachment: {attachment.name}")
+                        return excel_data
+                        
+                    except Exception as e:
+                        logging.error(f"Error getting attachment content: {str(e)}")
+                        # Try alternative method
+                        try:
+                            content = attachment.content
+                            if isinstance(content, str):
+                                content = content.encode('utf-8')
+                            excel_data = io.BytesIO(content)
+                            logging.info(f"Successfully downloaded attachment using alternative method: {attachment.name}")
+                            return excel_data
+                        except Exception as e2:
+                            logging.error(f"Alternative method also failed: {str(e2)}")
+                            continue
             
             # If we get here, we didn't find the right attachment
             logging.error("Available attachments:")
