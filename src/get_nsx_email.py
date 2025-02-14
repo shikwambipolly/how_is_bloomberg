@@ -102,16 +102,39 @@ class NSXEmailProcessor:
     def download_nsx_report(self, message):
         """Download the NSX Daily Report attachment"""
         try:
-            for attachment in message.attachments:
+            logging.info(f"Checking message with subject: {message.subject}")
+            
+            # First, ensure we have the full message details
+            message.attachments.download_attachments()
+            
+            # Get all attachments
+            attachments = list(message.attachments)
+            logging.info(f"Found {len(attachments)} attachments")
+            
+            # Debug: Print all attachment names
+            for idx, attachment in enumerate(attachments):
+                logging.info(f"Attachment {idx + 1}: {attachment.name}")
+            
+            # Look for NSX Daily Report
+            for attachment in attachments:
                 if attachment.name and "NSX Daily Report" in attachment.name:
+                    logging.info(f"Found NSX Daily Report attachment: {attachment.name}")
+                    
                     # Get the attachment content
                     content = attachment.content
+                    if content is None:
+                        logging.error("Attachment content is None")
+                        continue
                     
                     # Create BytesIO object from the content
                     excel_data = io.BytesIO(content)
                     logging.info(f"Successfully downloaded attachment: {attachment.name}")
                     return excel_data
             
+            # If we get here, we didn't find the right attachment
+            logging.error("Available attachments:")
+            for attachment in attachments:
+                logging.error(f"- {attachment.name} (Type: {type(attachment)})")
             raise ValueError("No NSX Daily Report attachment found in the email")
             
         except Exception as e:
