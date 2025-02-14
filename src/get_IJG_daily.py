@@ -1,9 +1,10 @@
 import pandas as pd
-from docx import Document
+import re
 import logging
 from datetime import datetime
 from utils import retry_with_notification
 from config import Config
+from run_all import WorkflowResult
 
 # Set up logging
 logging.basicConfig(
@@ -14,72 +15,80 @@ logging.basicConfig(
 
 class IJGDailyProcessor:
     def __init__(self):
-        self.docx_path = Config.IJG_DAILY_PATH
-        if not self.docx_path.exists():
-            raise FileNotFoundError(f"Document not found at path: {self.docx_path}")
+        self.excel_path = Config.IJG_DAILY_PATH
+        if not self.excel_path.exists():
+            raise FileNotFoundError(f"Excel file not found at path: {self.excel_path}")
+    
+    def _is_gi_code(self, value):
+        """Check if value matches GI followed by 2 numbers pattern"""
+        if pd.isna(value):
+            return False
+        pattern = r'^GI\d{2}$'
+        return bool(re.match(pattern, str(value).strip()))
     
     @retry_with_notification()
-    def extract_table_data(self):
-        """Extract table data from page 5 of the Word document"""
+    def extract_yields_data(self):
+        """Extract data from Yields sheet where column A contains GI codes"""
         try:
-            # Load the document
-            doc = Document(self.docx_path)
-            logging.info(f"Successfully loaded document: {self.docx_path}")
+            # Read the Yields sheet
+            df_yields = pd.read_excel(
+                self.excel_path,
+                sheet_name="Yields",
+                engine='openpyxl'
+            )
             
-            # Track paragraphs to identify page 5
-            # In Word, each paragraph and table contributes to the page count
-            current_page = 1
-            page_5_elements = []
+            # Filter rows where column A contains GI codes
+            gi_rows = df_yields[df_yields.iloc[:, 0].apply(self._is_gi_code)]
             
-            # Collect all elements (paragraphs and tables) to track page 5
-            for element in doc.element.body:
-                if element.tag.endswith('p'):  # Paragraph
-                    if current_page == 5:
-                        page_5_elements.append(('p', element))
-                elif element.tag.endswith('tbl'):  # Table
-                    if current_page == 5:
-                        page_5_elements.append(('tbl', element))
-                
-                # Check for page breaks
-                for child in element.iter():
-                    if child.tag.endswith('br') and child.get('type') == 'page':
-                        current_page += 1
-                        if current_page > 5:
-                            break
+            if gi_rows.empty:
+                raise ValueError("No GI codes found in Yields sheet")
             
-            # Find tables on page 5
-            target_table = None
-            for element_type, element in page_5_elements:
-                if element_type == 'tbl':
-                    table = doc.tables[list(doc.element.body).index(element)]
-                    if table.rows and table.rows[0].cells and "Bond" in table.rows[0].cells[0].text:
-                        target_table = table
-                        break
-            
-            if not target_table:
-                raise ValueError("Could not find table starting with 'Bond' on page 5")
-            
-            # Extract headers and data
-            headers = []
-            for cell in target_table.rows[0].cells:
-                headers.append(cell.text.strip())
-            
-            # Extract rows
-            data = []
-            for row in target_table.rows[1:]:  # Skip header row
-                row_data = []
-                for cell in row.cells:
-                    row_data.append(cell.text.strip())
-                data.append(row_data)
-            
-            # Create DataFrame
-            df = pd.DataFrame(data, columns=headers)
-            
-            logging.info(f"Successfully extracted table data from page 5 with {len(df)} rows")
-            return df
+            logging.info(f"Found {len(gi_rows)} rows with GI codes in Yields sheet")
+            return gi_rows
             
         except Exception as e:
-            logging.error(f"Error extracting table data: {str(e)}")
+            logging.error(f"Error extracting Yields data: {str(e)}")
+            raise
+    
+    @retry_with_notification()
+    def extract_spread_data(self):
+        """Extract rows 2-19 from Spread Calc sheet"""
+        try:
+            # Read the Spread Calc sheet
+            df_spread = pd.read_excel(
+                self.excel_path,
+                sheet_name="Spread Calc",
+                engine='openpyxl'
+            )
+            
+            # Extract rows 2-19 (1-18 in 0-based index)
+            spread_rows = df_spread.iloc[1:19].copy()
+            
+            if spread_rows.empty:
+                raise ValueError("No data found in rows 2-19 of Spread Calc sheet")
+            
+            logging.info(f"Successfully extracted {len(spread_rows)} rows from Spread Calc sheet")
+            return spread_rows
+            
+        except Exception as e:
+            logging.error(f"Error extracting Spread Calc data: {str(e)}")
+            raise
+    
+    def combine_data(self, yields_data, spread_data):
+        """Combine data from both sheets into one DataFrame"""
+        try:
+            # Add source column to each DataFrame
+            yields_data = yields_data.assign(Source='Yields')
+            spread_data = spread_data.assign(Source='Spread Calc')
+            
+            # Combine the DataFrames
+            combined_df = pd.concat([yields_data, spread_data], ignore_index=True)
+            
+            logging.info(f"Successfully combined data: {len(combined_df)} total rows")
+            return combined_df
+            
+        except Exception as e:
+            logging.error(f"Error combining data: {str(e)}")
             raise
     
     def save_data(self, df):
@@ -93,24 +102,32 @@ class IJGDailyProcessor:
             logging.error(f"Error saving data: {str(e)}")
             raise
 
-def run_ijg_workflow():
+def run_ijg_workflow() -> WorkflowResult:
     """Run the complete IJG workflow"""
     try:
         # Initialize processor
         processor = IJGDailyProcessor()
         
-        # Extract table data
-        df = processor.extract_table_data()
+        # Extract data from both sheets
+        yields_data = processor.extract_yields_data()
+        spread_data = processor.extract_spread_data()
+        
+        # Combine the data
+        combined_df = processor.combine_data(yields_data, spread_data)
         
         # Save to CSV
-        output_file = processor.save_data(df)
+        output_file = processor.save_data(combined_df)
         
         logging.info(f"Successfully completed IJG workflow")
-        return True
+        return WorkflowResult(success=True, data=combined_df)
         
     except Exception as e:
-        logging.error(f"Error in IJG workflow: {str(e)}")
-        return False
+        error_msg = f"Error in IJG workflow: {str(e)}"
+        logging.error(error_msg)
+        return WorkflowResult(success=False, error=error_msg)
 
 if __name__ == "__main__":
-    run_ijg_workflow()
+    result = run_ijg_workflow()
+    if result.success:
+        print("IJG data preview:")
+        print(result.data.head())

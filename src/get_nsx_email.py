@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import logging
 from utils import retry_with_notification
 from config import Config
+from run_all import WorkflowResult
 
 # Set up logging
 logging.basicConfig(
@@ -123,7 +124,7 @@ class NSXEmailProcessor:
             logging.error(f"Error saving bonds data: {str(e)}")
             raise
 
-def run_nsx_workflow():
+def run_nsx_workflow() -> WorkflowResult:
     """Run the complete NSX email workflow"""
     try:
         # Initialize processor
@@ -142,11 +143,15 @@ def run_nsx_workflow():
         output_file = processor.save_bonds_data(df)
         
         logging.info(f"Successfully completed NSX workflow")
-        return True
+        return WorkflowResult(success=True, data=df)
         
     except Exception as e:
-        logging.error(f"Error in NSX workflow: {str(e)}")
-        return False
+        error_msg = f"Error in NSX workflow: {str(e)}"
+        logging.error(error_msg)
+        return WorkflowResult(success=False, error=error_msg)
 
 if __name__ == "__main__":
-    run_nsx_workflow()
+    result = run_nsx_workflow()
+    if result.success:
+        print("NSX data preview:")
+        print(result.data.head())

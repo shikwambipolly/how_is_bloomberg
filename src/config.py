@@ -22,12 +22,9 @@ class Config:
     O365_CLIENT_ID = os.getenv('O365_CLIENT_ID')
     O365_CLIENT_SECRET = os.getenv('O365_CLIENT_SECRET')
 
-    # Email notification configuration
-    SMTP_SERVER = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
-    SMTP_PORT = int(os.getenv('SMTP_PORT', '587'))
-    SENDER_EMAIL = os.getenv('SENDER_EMAIL')
-    SENDER_PASSWORD = os.getenv('SENDER_PASSWORD')
-    RECIPIENT_EMAIL = os.getenv('RECIPIENT_EMAIL')
+    # Error notification configuration
+    ERROR_RECIPIENT_1 = os.getenv('ERROR_RECIPIENT_1')
+    ERROR_RECIPIENT_2 = os.getenv('ERROR_RECIPIENT_2')
 
     @classmethod
     def validate(cls):
@@ -35,9 +32,8 @@ class Config:
         required_vars = [
             ('O365_CLIENT_ID', cls.O365_CLIENT_ID),
             ('O365_CLIENT_SECRET', cls.O365_CLIENT_SECRET),
-            ('SENDER_EMAIL', cls.SENDER_EMAIL),
-            ('SENDER_PASSWORD', cls.SENDER_PASSWORD),
-            ('RECIPIENT_EMAIL', cls.RECIPIENT_EMAIL),
+            ('ERROR_RECIPIENT_1', cls.ERROR_RECIPIENT_1),
+            ('ERROR_RECIPIENT_2', cls.ERROR_RECIPIENT_2),
             ('IJG_DAILY_PATH', cls.IJG_DAILY_PATH),
         ]
 

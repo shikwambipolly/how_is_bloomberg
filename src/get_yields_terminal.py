@@ -5,6 +5,7 @@ from datetime import datetime
 import logging
 from utils import retry_with_notification
 from config import Config
+from run_all import WorkflowResult
 
 # Set up logging
 logging.basicConfig(
@@ -105,7 +106,7 @@ def get_bond_yields(session, bonds):
         logging.error(f"Error fetching bond yields: {str(e)}")
         raise
 
-def run_terminal_workflow():
+def run_terminal_workflow() -> WorkflowResult:
     """Run the complete Bloomberg Terminal workflow"""
     session = None
     try:
@@ -121,20 +122,26 @@ def run_terminal_workflow():
         # Get yields
         results = get_bond_yields(session, bonds)
         
-        # Convert to DataFrame and save to CSV
+        # Convert to DataFrame
         df = pd.DataFrame(results)
+        
+        # Save to CSV
         output_file = Config.get_output_path('bloomberg') / f'bond_yields_terminal_{datetime.now().strftime("%Y%m%d")}.csv'
         df.to_csv(output_file, index=False)
         
         logging.info(f"Successfully saved yields to {output_file}")
-        return True
+        return WorkflowResult(success=True, data=df)
         
     except Exception as e:
-        logging.error(f"Error in Bloomberg Terminal workflow: {str(e)}")
-        return False
+        error_msg = f"Error in Bloomberg Terminal workflow: {str(e)}"
+        logging.error(error_msg)
+        return WorkflowResult(success=False, error=error_msg)
     finally:
         if session:
             session.stop()
 
 if __name__ == "__main__":
-    run_terminal_workflow()
+    result = run_terminal_workflow()
+    if result.success:
+        print("Bloomberg data preview:")
+        print(result.data.head())

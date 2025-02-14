@@ -1,86 +1,140 @@
 # Bond Data Collection System
 
-This project provides scripts to fetch bond data from multiple sources:
-- Bloomberg Terminal (yields)
-- NSX Daily Report (via email)
-- IJG Daily Report (from Word document)
+A robust, automated system for collecting and processing bond data from multiple sources:
+- Bloomberg Terminal (real-time bond yields)
+- NSX Daily Report (via Office 365 email)
+- IJG Daily Report (Excel-based bond data)
 
-## Features
+## Project Overview
 
-- Fetch bond yield data from Bloomberg Terminal
-- Download and process NSX Daily Report from email
-- Extract bond data from IJG Daily Report
-- Automatic retry logic with 15-minute intervals
-- Error notification emails
-- Comprehensive logging
-- Single command to run all workflows
+This system automates the daily collection of bond data from three distinct sources, processes it, and stores it in a standardized format. Each data source has its own workflow with built-in error handling, retry mechanisms, and notification systems.
+
+### Data Sources
+
+1. **Bloomberg Terminal**
+   - Connects to local Bloomberg Terminal
+   - Fetches yield data (Bid/Ask) for configured bonds
+   - Uses Bloomberg's Python API (blpapi)
+
+2. **NSX Daily Report**
+   - Monitors Office 365 inbox for emails from info@nsx.com.na
+   - Downloads and processes "NSX Daily Report" Excel attachments
+   - Extracts bond trading data from specific sheets
+
+3. **IJG Daily Report**
+   - Processes daily IJG Excel report
+   - Extracts specific bond data:
+     - Rows with GI codes from "Yields" sheet
+     - Rows 2-19 from "Spread Calc" sheet
+   - Combines data with source tracking
+
+### Key Features
+
+- **Automated Data Collection**
+  - Single command to run all workflows
+  - Individual workflow execution option
+  - Automatic retry on failures
+
+- **Robust Error Handling**
+  - Three retry attempts with 15-minute intervals
+  - Detailed error logging
+  - Email notifications for persistent failures
+
+- **Data Processing**
+  - Standardized data formats
+  - Source tracking
+  - Data validation at each step
+
+- **Monitoring & Notifications**
+  - Uses Office 365 for email monitoring and notifications
+  - Configurable notification recipients
+  - Detailed logging of all operations
 
 ## Prerequisites
 
 ### Software Requirements
 - Python 3.7+
-- Bloomberg Terminal installed (for Terminal version)
-- Microsoft Office 365 account (for NSX email access)
+- Bloomberg Terminal installed locally
+- Microsoft Office 365 account with appropriate permissions
+- Git (for version control)
 
 ### Python Dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
+### Required Credentials
+1. **Bloomberg Terminal**
+   - Local installation
+   - Default connection settings
+
+2. **Microsoft Office 365**
+   - Azure App Registration
+   - Required permissions:
+     - Mail.Read
+     - Mail.Send
+     - Mail.ReadWrite
+
 ## Project Structure
 ```
 bond-data-collection/
 ├── README.md
 ├── requirements.txt
+├── .env                        # Configuration file (not in version control)
+├── .env.example               # Example configuration template
 ├── src/
-│   ├── run_all.py              # Master script to run all workflows
-│   ├── get_yields_terminal.py  # Bloomberg Terminal data collection
-│   ├── get_nsx_email.py        # NSX email processing
-│   ├── get_IJG_daily.py        # IJG report processing
-│   ├── utils.py                # Utility functions
-│   └── bonds.json              # Bond configuration file
-├── output/                     # Data output directory
-│   ├── bloomberg/             
-│   ├── nsx/
-│   └── ijg/
-└── logs/                       # Log files directory
+│   ├── run_all.py            # Master workflow orchestrator
+│   ├── config.py             # Configuration management
+│   ├── utils.py              # Common utilities
+│   ├── get_yields_terminal.py # Bloomberg data collection
+│   ├── get_nsx_email.py      # NSX email processing
+│   ├── get_IJG_daily.py      # IJG data processing
+│   └── bonds.json            # Bond configuration
+├── output/                    # Data output directory
+│   ├── bloomberg/            # Bloomberg yield data
+│   ├── nsx/                  # NSX daily report data
+│   └── ijg/                  # IJG daily data
+└── logs/                     # Log files directory
 ```
 
 ## Configuration
 
-### Environment Variables
-Set the following environment variables:
-
+### Environment Setup
+1. Copy `.env.example` to `.env`
 ```bash
-# Bloomberg B-PIPE (if using)
-export BLOOMBERG_HOST="your-bpipe-host"
-export BLOOMBERG_PORT="your-bpipe-port"
-export BLOOMBERG_APP_NAME="your-app-name"
-export BLOOMBERG_APP_AUTH_KEY="your-auth-key"
-
-# Microsoft 365 (for NSX email)
-export O365_CLIENT_ID="your-client-id"
-export O365_CLIENT_SECRET="your-client-secret"
-
-# Email Notifications
-export SMTP_SERVER="smtp.gmail.com"
-export SMTP_PORT="587"
-export SENDER_EMAIL="your-sender-email"
-export SENDER_PASSWORD="your-app-specific-password"
-export RECIPIENT_EMAIL="your-notification-recipient"
+cp .env.example .env
 ```
 
-### bonds.json
-Configure your bonds in the `bonds.json` file:
+2. Configure environment variables:
+```bash
+# Bloomberg Terminal Configuration
+BLOOMBERG_HOST=localhost
+BLOOMBERG_PORT=8194
+
+# Microsoft 365 Configuration
+O365_CLIENT_ID=your_client_id
+O365_CLIENT_SECRET=your_client_secret
+
+# Error Notification Configuration
+ERROR_RECIPIENT_1=first.recipient@example.com
+ERROR_RECIPIENT_2=second.recipient@example.com
+
+# File Paths
+IJG_DAILY_PATH=/path/to/ijg/daily/report.xlsx
+BONDS_JSON_PATH=src/bonds.json
+
+# Output Configuration
+OUTPUT_DIR=output
+LOGS_DIR=logs
+```
+
+### Bond Configuration
+Configure target bonds in `bonds.json`:
 ```json
 [
     {
         "ID": "CP507394@EXCH Corp",
         "Bond": "R186"
-    },
-    {
-        "ID": "EI258596@EXCH Corp",
-        "Bond": "R213"
     }
 ]
 ```
@@ -88,49 +142,28 @@ Configure your bonds in the `bonds.json` file:
 ## Usage
 
 ### Running All Workflows
-To run all data collection workflows:
 ```bash
 python src/run_all.py
 ```
 
-This will:
-1. Run Bloomberg Terminal data collection
-2. Process NSX email and extract data
-3. Process IJG daily report
-4. Save all data to respective output directories
-5. Generate logs for each process
-
-### Individual Workflows
-You can also run individual workflows:
+### Running Individual Workflows
 ```bash
 python src/get_yields_terminal.py  # Bloomberg only
 python src/get_nsx_email.py       # NSX only
 python src/get_IJG_daily.py       # IJG only
 ```
 
-## Retry Logic and Error Handling
-
-Each workflow includes:
-- 3 retry attempts with 15-minute intervals
-- Email notifications on final failure
-- Detailed logging of all attempts and errors
-
-The system will:
-1. Attempt each operation
-2. On failure, wait 15 minutes and retry
-3. After 3 failed attempts, send error notification email
-4. Continue with next workflow
-
-## Output
-
+### Output
 Each workflow generates:
 1. CSV data files in respective output directories
-2. Detailed log files in the logs directory
-3. Error notification emails (if failures occur)
+2. Detailed log files
+3. Error notifications (if needed)
 
-## Scheduling Daily Runs
+## Production Setup
 
-### Windows (Task Scheduler)
+### Daily Scheduling
+
+#### Windows (Task Scheduler)
 1. Open Task Scheduler
 2. Create Basic Task
 3. Set trigger to Daily
@@ -138,25 +171,85 @@ Each workflow generates:
 5. Program/script: `python`
 6. Arguments: `path/to/src/run_all.py`
 
-### Linux/Unix (Cron)
+#### Linux/Unix (Cron)
 Add to crontab:
 ```bash
 0 9 * * 1-5 cd /path/to/project && python src/run_all.py
 ```
 
-## Error Handling
+### Monitoring
+- Check log files in `logs/` directory
+- Monitor error notifications
+- Review output CSV files
 
-The system includes comprehensive error handling for:
-- Bloomberg connection failures
-- Missing or invalid bond data
-- Email authentication errors
-- File processing errors
-- Network connectivity issues
+### Error Handling
+The system includes comprehensive error handling:
+1. **Retry Logic**
+   - 3 attempts per operation
+   - 15-minute intervals between attempts
+   - Automatic notification on final failure
 
-All errors are:
-1. Logged to appropriate log files
-2. Retried up to 3 times
-3. Reported via email if persistent
+2. **Data Validation**
+   - Input file existence checks
+   - Data format validation
+   - Output data verification
+
+3. **Error Notifications**
+   - Sent via Office 365
+   - Include error details
+   - Sent to multiple recipients
+
+## Security Considerations
+
+1. **Credentials**
+   - Store in `.env` file
+   - Never commit to version control
+   - Use secure storage in production
+
+2. **Office 365**
+   - Use App Registration
+   - Implement least privilege access
+   - Regular credential rotation
+
+3. **Data Protection**
+   - Secure file permissions
+   - Clean up temporary files
+   - Encrypt sensitive data
+
+## Maintenance
+
+### Daily Tasks
+- Monitor log files
+- Check error notifications
+- Verify data output
+
+### Weekly Tasks
+- Review system performance
+- Check disk space
+- Backup configuration
+
+### Monthly Tasks
+- Rotate log files
+- Update dependencies
+- Review access credentials
+
+## Troubleshooting
+
+### Common Issues
+1. **Bloomberg Connection**
+   - Verify Terminal is running
+   - Check connection settings
+   - Review Bloomberg logs
+
+2. **Email Processing**
+   - Check O365 credentials
+   - Verify email format
+   - Review attachment names
+
+3. **IJG Data**
+   - Verify file path
+   - Check Excel format
+   - Validate sheet names
 
 ## Contributing
 
@@ -164,7 +257,7 @@ All errors are:
 2. Create your feature branch
 3. Commit your changes
 4. Push to the branch
-5. Open a Pull Request
+5. Create a Pull Request
 
 ## License
 
