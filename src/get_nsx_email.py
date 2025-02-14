@@ -6,6 +6,7 @@ import logging
 from utils import retry_with_notification
 from config import Config
 from workflow_result import WorkflowResult
+import pytz  # Library for handling timezones
 
 # Set up logging
 logging.basicConfig(
@@ -42,25 +43,50 @@ class NSXEmailProcessor:
             # Access mailbox
             mailbox = self.account.mailbox()
             
-            # Get inbox
+            # Get the main Inbox folder
             inbox = mailbox.inbox_folder()
             
-            # Query for emails from NSX in the last 24 hours
-            query = inbox.new_query()
+            # Get subfolders of Inbox
+            inbox_subfolders = inbox.get_folders()
+            
+            # Find the NSX subfolder
+            nsx_folder = None
+            for folder in inbox_subfolders:
+                if folder.name == "NSX":
+                    nsx_folder = folder
+                    break
+            
+            if not nsx_folder:
+                raise ValueError("Could not find the NSX subfolder in your Inbox")
+            
+            logging.info("Successfully found NSX subfolder")
+            
+            # Get current time in UTC
+            now = datetime.now(pytz.UTC)
+            time_threshold = now - timedelta(hours=12)
+            
+            # Query for emails from NSX in the last 12 hours
+            query = nsx_folder.new_query()
             query.on_attribute('from').equals('info@nsx.com.na')
-            query.chain('and').on_attribute('received').greater_equal(datetime.now() - timedelta(hours=12))
+            query.chain('and').on_attribute('receivedDateTime').greater_equal(time_threshold)
             
             # Get messages
-            messages = inbox.get_messages(query=query, limit=25)  # Limit to recent messages
+            messages = nsx_folder.get_messages(query=query, limit=25)  # Limit to recent messages
             
             # Sort by received time and get latest
             latest_message = None
-            latest_time = datetime.min
+            latest_time = datetime.min.replace(tzinfo=pytz.UTC)
             
             for message in messages:
-                if message.received and message.received > latest_time:
-                    latest_message = message
-                    latest_time = message.received
+                if message.received:
+                    # Ensure message.received is timezone-aware
+                    received_time = message.received
+                    if received_time.tzinfo is None:
+                        received_time = pytz.UTC.localize(received_time)
+                    
+                    if received_time > latest_time:
+                        latest_message = message
+                        latest_time = received_time
             
             if not latest_message:
                 raise ValueError("No NSX emails found in the last 12 hours")
