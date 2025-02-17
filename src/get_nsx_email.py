@@ -71,14 +71,16 @@ class NSXEmailProcessor:
             query.on_attribute('from').equals('info@nsx.com.na')
             query.chain('and').on_attribute('receivedDateTime').greater_equal(time_threshold)
             
-            # Get messages
-            messages = nsx_folder.get_messages(query=query, limit=25)  # Limit to recent messages
+            # Get messages with full details including attachments
+            messages = list(nsx_folder.get_messages(query=query, limit=25, download_attachments=True))
+            logging.info(f"Found {len(messages)} messages from NSX")
             
             # Sort by received time and get latest
             latest_message = None
             latest_time = datetime.min.replace(tzinfo=pytz.UTC)
             
             for message in messages:
+                logging.info(f"Checking message: Subject='{message.subject}', Has attachments={hasattr(message, 'attachments')}")
                 if message.received:
                     # Ensure message.received is timezone-aware
                     received_time = message.received
@@ -92,7 +94,16 @@ class NSXEmailProcessor:
             if not latest_message:
                 raise ValueError("No NSX emails found in the last 12 hours")
             
+            # Ensure we have the full message with attachments
+            if not hasattr(latest_message, 'attachments'):
+                latest_message.attachments.download_attachments()
+            
             logging.info(f"Found latest NSX email from {latest_time}")
+            logging.info(f"Subject: {latest_message.subject}")
+            logging.info(f"Has attachments: {hasattr(latest_message, 'attachments')}")
+            if hasattr(latest_message, 'attachments'):
+                logging.info(f"Number of attachments: {len(list(latest_message.attachments))}")
+            
             return latest_message
             
         except Exception as e:
@@ -105,17 +116,23 @@ class NSXEmailProcessor:
         try:
             logging.info(f"Checking message with subject: {message.subject}")
             
+            # Ensure we have the full message details
+            message.attachments.download_attachments()
+            
             # Get all attachments
             attachments = list(message.attachments)
             logging.info(f"Found {len(attachments)} attachments")
             
-            # Debug: Print all attachment names
+            # Debug: Print all attachment names and details
             for idx, attachment in enumerate(attachments):
-                logging.info(f"Attachment {idx + 1}: {attachment.name}")
+                logging.info(f"Attachment {idx + 1}:")
+                logging.info(f"  - Name: {attachment.name if hasattr(attachment, 'name') else 'No name'}")
+                logging.info(f"  - Type: {type(attachment)}")
+                logging.info(f"  - Has content: {hasattr(attachment, 'content')}")
             
             # Look for NSX Daily Report
             for attachment in attachments:
-                if attachment.name and "NSX Daily Report" in attachment.name:
+                if hasattr(attachment, 'name') and attachment.name and "NSX Daily Report" in attachment.name:
                     logging.info(f"Found NSX Daily Report attachment: {attachment.name}")
                     
                     # Create temp directory if it doesn't exist
@@ -125,12 +142,32 @@ class NSXEmailProcessor:
                     temp_file = temp_dir / attachment.name
                     
                     try:
-                        # Save the attachment directly
-                        attachment.save(temp_dir)
+                        # Try to save using the attachment's save method
+                        try:
+                            attachment.save(temp_dir)
+                        except Exception as save_error:
+                            logging.error(f"Error using save method: {str(save_error)}")
+                            # Fallback: try to save manually
+                            if hasattr(attachment, 'content'):
+                                with open(temp_file, 'wb') as f:
+                                    content = attachment.content
+                                    if isinstance(content, str):
+                                        content = content.encode('utf-8')
+                                    f.write(content)
+                            else:
+                                raise ValueError("No content available in attachment")
+                        
                         logging.info(f"Successfully saved attachment to: {temp_file}")
                         
                         if not temp_file.exists():
                             raise FileNotFoundError(f"File was not created: {temp_file}")
+                        
+                        # Verify file size
+                        file_size = temp_file.stat().st_size
+                        logging.info(f"Saved file size: {file_size} bytes")
+                        
+                        if file_size == 0:
+                            raise ValueError("Saved file is empty")
                         
                         return temp_file
                         
@@ -141,6 +178,9 @@ class NSXEmailProcessor:
                         raise
             
             # If we get here, we didn't find the right attachment
+            logging.error("Available attachment names:")
+            for attachment in attachments:
+                logging.error(f"- {attachment.name if hasattr(attachment, 'name') else 'No name'}")
             raise ValueError("No NSX Daily Report attachment found in the email")
             
         except Exception as e:
