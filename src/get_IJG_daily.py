@@ -16,11 +16,20 @@ from workflow_result import WorkflowResult  # Custom class for workflow results
 
 # Set up logging to track the program's execution
 # This creates a new log file each day with the date in the filename
-logging.basicConfig(
-    level=logging.INFO,  # Log all information messages and above
-    format='%(asctime)s - %(levelname)s - %(message)s',  # Include timestamp, level, and message
-    filename=Config.get_logs_path() / f'ijg_daily_{datetime.now().strftime("%Y%m%d")}.log'
-)
+logger = logging.getLogger('ijg_workflow')
+logger.setLevel(logging.INFO)
+
+# Create a file handler
+log_file = Config.get_logs_path() / f'ijg_daily_{datetime.now().strftime("%Y%m%d")}.log'
+file_handler = logging.FileHandler(log_file)
+file_handler.setLevel(logging.INFO)
+
+# Create a formatter
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(formatter)
+
+# Add the handler to the logger
+logger.addHandler(file_handler)
 
 class IJGDailyProcessor:
     """
@@ -77,11 +86,11 @@ class IJGDailyProcessor:
             if gi_rows.empty:
                 raise ValueError("No GI codes found in Yields sheet")
             
-            logging.info(f"Found {len(gi_rows)} rows with GI codes in Yields sheet")
+            logger.info(f"Found {len(gi_rows)} rows with GI codes in Yields sheet")
             return gi_rows
             
         except Exception as e:
-            logging.error(f"Error extracting Yields data: {str(e)}")
+            logger.error(f"Error extracting Yields data: {str(e)}")
             raise
     
     @retry_with_notification()  # Retry this operation if it fails
@@ -97,7 +106,7 @@ class IJGDailyProcessor:
             # Read the Spread Calc sheet from the Excel file
             df_spread = pd.read_excel(
                 self.excel_path,
-                sheet_name="Spread Calc",
+                sheet_name="Spread calc",
                 engine='openpyxl'
             )
             
@@ -107,11 +116,11 @@ class IJGDailyProcessor:
             if spread_rows.empty:
                 raise ValueError("No data found in rows 2-19 of Spread Calc sheet")
             
-            logging.info(f"Successfully extracted {len(spread_rows)} rows from Spread Calc sheet")
+            logger.info(f"Successfully extracted {len(spread_rows)} rows from Spread Calc sheet")
             return spread_rows
             
         except Exception as e:
-            logging.error(f"Error extracting Spread Calc data: {str(e)}")
+            logger.error(f"Error extracting Spread Calc data: {str(e)}")
             raise
     
     def save_data(self, df: pd.DataFrame, data_type: str) -> str:
@@ -133,11 +142,11 @@ class IJGDailyProcessor:
             
             # Save to CSV file
             df.to_csv(output_file, index=False)
-            logging.info(f"Successfully saved {data_type} data to {output_file}")
+            logger.info(f"Successfully saved {data_type} data to {output_file}")
             return output_file
             
         except Exception as e:
-            logging.error(f"Error saving {data_type} data: {str(e)}")
+            logger.error(f"Error saving {data_type} data: {str(e)}")
             raise
 
 def run_ijg_workflow() -> WorkflowResult:
@@ -169,12 +178,12 @@ def run_ijg_workflow() -> WorkflowResult:
             'spread': spread_data
         }
         
-        logging.info(f"Successfully completed IJG workflow")
+        logger.info(f"Successfully completed IJG workflow")
         return WorkflowResult(success=True, data=result_data)
         
     except Exception as e:
         error_msg = f"Error in IJG workflow: {str(e)}"
-        logging.error(error_msg)
+        logger.error(error_msg)
         return WorkflowResult(success=False, error=error_msg)
 
 # This section only runs if you execute this file directly (not when imported)

@@ -10,11 +10,20 @@ import pytz  # Library for handling timezones
 from pathlib import Path
 
 # Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    filename=Config.get_logs_path() / f'nsx_email_fetch_{datetime.now().strftime("%Y%m%d")}.log'
-)
+logger = logging.getLogger('nsx_workflow')
+logger.setLevel(logging.INFO)
+
+# Create a file handler
+log_file = Config.get_logs_path() / f'nsx_email_fetch_{datetime.now().strftime("%Y%m%d")}.log'
+file_handler = logging.FileHandler(log_file)
+file_handler.setLevel(logging.INFO)
+
+# Create a formatter
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(formatter)
+
+# Add the handler to the logger
+logger.addHandler(file_handler)
 
 class NSXEmailProcessor:
     def __init__(self):
@@ -32,9 +41,9 @@ class NSXEmailProcessor:
             result = self.account.authenticate()
             if not result:
                 raise Exception("Authentication failed")
-            logging.info("Successfully authenticated with Microsoft 365")
+            logger.info("Successfully authenticated with Microsoft 365")
         except Exception as e:
-            logging.error(f"Authentication error: {str(e)}")
+            logger.error(f"Authentication error: {str(e)}")
             raise
     
     @retry_with_notification()
@@ -60,7 +69,7 @@ class NSXEmailProcessor:
             if not nsx_folder:
                 raise ValueError("Could not find the NSX subfolder in your Inbox")
             
-            logging.info("Found NSX subfolder")
+            logger.info("Found NSX subfolder")
             
             # Get current time in UTC
             now = datetime.now(pytz.UTC)
@@ -96,18 +105,18 @@ class NSXEmailProcessor:
             if not hasattr(latest_message, 'attachments'):
                 latest_message.attachments.download_attachments()
             
-            logging.info(f"Found latest NSX email from {latest_time}")
+            logger.info(f"Found latest NSX email from {latest_time}")
             return latest_message
             
         except Exception as e:
-            logging.error(f"Error fetching NSX email: {str(e)}")
+            logger.error(f"Error fetching NSX email: {str(e)}")
             raise
     
     @retry_with_notification()
     def download_nsx_report(self, message):
         """Download the NSX Daily Report attachment"""
         try:
-            logging.info(f"Processing email with subject: {message.subject}")
+            logger.info(f"Processing email with subject: {message.subject}")
             
             # Ensure we have the full message details
             message.attachments.download_attachments()
@@ -118,7 +127,7 @@ class NSXEmailProcessor:
             # Look for NSX Daily Report
             for attachment in attachments:
                 if hasattr(attachment, 'name') and attachment.name and "NSX Daily Report" in attachment.name:
-                    logging.info(f"Found NSX Daily Report attachment: {attachment.name}")
+                    logger.info(f"Found NSX Daily Report attachment: {attachment.name}")
                     
                     # Create temp directory if it doesn't exist
                     temp_dir = Config.get_output_path('temp')
@@ -152,13 +161,13 @@ class NSXEmailProcessor:
             raise ValueError("No NSX Daily Report attachment found in the email")
             
         except Exception as e:
-            logging.error(f"Error downloading attachment: {str(e)}")
+            logger.error(f"Error downloading attachment: {str(e)}")
             raise
     
     def process_bonds_data(self, excel_path):
         """Process the bonds data from the Excel file"""
         try:
-            logging.info(f"Processing NSX Daily Report from: {excel_path}")
+            logger.info(f"Processing NSX Daily Report from: {excel_path}")
             
             # Read the Excel file
             df = pd.read_excel(excel_path, sheet_name="Bonds-Trading ATS")
@@ -184,7 +193,7 @@ class NSXEmailProcessor:
             if df_processed.empty:
                 raise ValueError("No data found after headers in Bonds-Trading ATS sheet")
             
-            logging.info(f"Successfully processed bonds data. Found {len(df_processed)} rows")
+            logger.info(f"Successfully processed bonds data. Found {len(df_processed)} rows")
             
             # Clean up temporary file
             if Path(excel_path).parent.name == 'temp':
@@ -193,7 +202,7 @@ class NSXEmailProcessor:
             return df_processed
             
         except Exception as e:
-            logging.error(f"Error processing bonds data: {str(e)}")
+            logger.error(f"Error processing bonds data: {str(e)}")
             if Path(excel_path).parent.name == 'temp' and excel_path.exists():
                 excel_path.unlink()
             raise
@@ -203,10 +212,10 @@ class NSXEmailProcessor:
         try:
             output_file = Config.get_output_path('nsx') / f'nsx_bonds_{datetime.now().strftime("%Y%m%d")}.csv'
             df.to_csv(output_file, index=False)
-            logging.info(f"Successfully saved bonds data to {output_file}")
+            logger.info(f"Successfully saved bonds data to {output_file}")
             return output_file
         except Exception as e:
-            logging.error(f"Error saving bonds data: {str(e)}")
+            logger.error(f"Error saving bonds data: {str(e)}")
             raise
 
 def run_nsx_workflow() -> WorkflowResult:
@@ -227,12 +236,12 @@ def run_nsx_workflow() -> WorkflowResult:
         # Save to CSV
         output_file = processor.save_bonds_data(df)
         
-        logging.info(f"Successfully completed NSX workflow")
+        logger.info(f"Successfully completed NSX workflow")
         return WorkflowResult(success=True, data=df)
         
     except Exception as e:
         error_msg = f"Error in NSX workflow: {str(e)}"
-        logging.error(error_msg)
+        logger.error(error_msg)
         return WorkflowResult(success=False, error=error_msg)
 
 if __name__ == "__main__":

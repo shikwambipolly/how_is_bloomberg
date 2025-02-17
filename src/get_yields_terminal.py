@@ -15,12 +15,21 @@ from utils import retry_with_notification  # Custom retry mechanism
 from config import Config  # Project configuration settings
 from workflow_result import WorkflowResult  # Custom class for workflow results
 
-# Set up logging to track the program's execution
-logging.basicConfig(
-    level=logging.INFO,  # Log all information messages and above
-    format='%(asctime)s - %(levelname)s - %(message)s',  # Include timestamp, level, and message
-    filename=Config.get_logs_path() / f'bloomberg_terminal_yields_{datetime.now().strftime("%Y%m%d")}.log'
-)
+# Set up logging
+logger = logging.getLogger('bloomberg_workflow')
+logger.setLevel(logging.INFO)
+
+# Create a file handler
+log_file = Config.get_logs_path() / f'bloomberg_terminal_yields_{datetime.now().strftime("%Y%m%d")}.log'
+file_handler = logging.FileHandler(log_file)
+file_handler.setLevel(logging.INFO)
+
+# Create a formatter
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(formatter)
+
+# Add the handler to the logger
+logger.addHandler(file_handler)
 
 @retry_with_notification()  # Retry this operation if it fails
 def init_bloomberg_terminal():
@@ -46,18 +55,18 @@ def init_bloomberg_terminal():
         
         # Attempt to start the session
         if not session.start():
-            logging.error("Failed to start session. Make sure Bloomberg Terminal is running.")
+            logger.error("Failed to start session. Make sure Bloomberg Terminal is running.")
             raise ConnectionError("Could not start Bloomberg Terminal session")
         
         # Open the reference data service
         if not session.openService("//blp/refdata"):
-            logging.error("Failed to open //blp/refdata service")
+            logger.error("Failed to open //blp/refdata service")
             raise ConnectionError("Could not open //blp/refdata service")
         
         return session
     
     except Exception as e:
-        logging.error(f"Error initializing Bloomberg Terminal session: {str(e)}")
+        logger.error(f"Error initializing Bloomberg Terminal session: {str(e)}")
         raise
 
 @retry_with_notification()  # Retry this operation if it fails
@@ -93,7 +102,7 @@ def get_bond_yields(session, bonds):
         request.append("fields", "YLD_YTM_BID")  # Yield to Maturity (Bid)
         request.append("fields", "YLD_YTM_ASK")  # Yield to Maturity (Ask)
         
-        logging.info(f"Sending request for {len(bonds)} bonds")
+        logger.info(f"Sending request for {len(bonds)} bonds")
         
         # Send the request to Bloomberg
         session.sendRequest(request)
@@ -123,7 +132,7 @@ def get_bond_yields(session, bonds):
                         except Exception as e:
                             yield_bid = None
                             yield_ask = None
-                            logging.warning(f"Could not get yield for {ticker}: {str(e)}")
+                            logger.warning(f"Could not get yield for {ticker}: {str(e)}")
                         
                         # Store the results
                         results.append({
@@ -139,7 +148,7 @@ def get_bond_yields(session, bonds):
         return results
     
     except Exception as e:
-        logging.error(f"Error fetching bond yields: {str(e)}")
+        logger.error(f"Error fetching bond yields: {str(e)}")
         raise
 
 def run_terminal_workflow() -> WorkflowResult:
@@ -159,7 +168,7 @@ def run_terminal_workflow() -> WorkflowResult:
         with open(Config.BONDS_JSON_PATH, 'r') as f:
             bonds = json.load(f)
         
-        logging.info(f"Loaded {len(bonds)} bonds from bonds.json")
+        logger.info(f"Loaded {len(bonds)} bonds from bonds.json")
         
         # Connect to Bloomberg Terminal
         session = init_bloomberg_terminal()
@@ -174,12 +183,12 @@ def run_terminal_workflow() -> WorkflowResult:
         output_file = Config.get_output_path('bloomberg') / f'bond_yields_terminal_{datetime.now().strftime("%Y%m%d")}.csv'
         df.to_csv(output_file, index=False)
         
-        logging.info(f"Successfully saved yields to {output_file}")
+        logger.info(f"Successfully saved yields to {output_file}")
         return WorkflowResult(success=True, data=df)
         
     except Exception as e:
         error_msg = f"Error in Bloomberg Terminal workflow: {str(e)}"
-        logging.error(error_msg)
+        logger.error(error_msg)
         return WorkflowResult(success=False, error=error_msg)
     finally:
         # Always close the Bloomberg session if it was opened
