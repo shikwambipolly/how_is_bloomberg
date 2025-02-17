@@ -105,29 +105,13 @@ class NSXEmailProcessor:
         try:
             logging.info(f"Checking message with subject: {message.subject}")
             
-            # First, ensure we have the full message details
-            message.attachments.download_attachments()
-            
             # Get all attachments
             attachments = list(message.attachments)
             logging.info(f"Found {len(attachments)} attachments")
             
-            # Debug: Print all attachment names and details
+            # Debug: Print all attachment names
             for idx, attachment in enumerate(attachments):
-                logging.info(f"Attachment {idx + 1}:")
-                logging.info(f"  - Name: {attachment.name}")
-                logging.info(f"  - Content Type: {getattr(attachment, 'content_type', 'Unknown')}")
-                logging.info(f"  - Size: {len(attachment.content) if attachment.content else 'Unknown'} bytes")
-                logging.info(f"  - Type: {type(attachment)}")
-                # Log all available attributes
-                logging.info("  - Available attributes:")
-                for attr in dir(attachment):
-                    if not attr.startswith('_'):
-                        try:
-                            value = getattr(attachment, attr)
-                            logging.info(f"    {attr}: {value}")
-                        except:
-                            pass
+                logging.info(f"Attachment {idx + 1}: {attachment.name}")
             
             # Look for NSX Daily Report
             for attachment in attachments:
@@ -137,88 +121,26 @@ class NSXEmailProcessor:
                     # Create temp directory if it doesn't exist
                     temp_dir = Config.get_output_path('temp')
                     
-                    # First save the raw content for inspection
-                    raw_file = temp_dir / f"raw_content_{datetime.now().strftime('%Y%m%d_%H%M%S')}.bin"
+                    # Use the original filename
+                    temp_file = temp_dir / attachment.name
                     
                     try:
-                        # Get content using multiple methods
-                        content = None
-                        content_source = None
+                        # Save the attachment directly
+                        attachment.save(temp_dir)
+                        logging.info(f"Successfully saved attachment to: {temp_file}")
                         
-                        # Try different methods to get content
-                        if hasattr(attachment, 'content') and attachment.content:
-                            content = attachment.content
-                            content_source = 'content'
-                        elif hasattr(attachment, 'bytes') and attachment.bytes:
-                            content = attachment.bytes
-                            content_source = 'bytes'
-                        elif hasattr(attachment, 'download_content'):
-                            content = attachment.download_content()
-                            content_source = 'download_content'
-                        
-                        if not content:
-                            raise ValueError("No content found in attachment using any method")
-                        
-                        logging.info(f"Got content using {content_source} method")
-                        logging.info(f"Content type: {type(content)}")
-                        logging.info(f"Content size: {len(content)} bytes")
-                        
-                        # Save raw content for inspection
-                        with open(raw_file, 'wb') as f:
-                            if isinstance(content, str):
-                                f.write(content.encode('utf-8'))
-                            else:
-                                f.write(content)
-                        
-                        logging.info(f"Saved raw content to: {raw_file}")
-                        
-                        # Try to determine file type from content
-                        file_signature = content[:8] if isinstance(content, bytes) else content.encode('utf-8')[:8]
-                        logging.info(f"File signature (first 8 bytes): {file_signature.hex()}")
-                        
-                        # Excel file signatures
-                        excel_signatures = {
-                            b'PK\x03\x04': '.xlsx',  # XLSX (ZIP format)
-                            b'\xD0\xCF\x11\xE0': '.xls',  # Old XLS format
-                        }
-                        
-                        # Determine extension
-                        extension = '.xlsx'  # Default
-                        for sig, ext in excel_signatures.items():
-                            if file_signature.startswith(sig):
-                                extension = ext
-                                logging.info(f"Detected file type: {ext}")
-                                break
-                        
-                        # Save with detected extension
-                        temp_file = temp_dir / f"temp_nsx_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}{extension}"
-                        
-                        with open(temp_file, 'wb') as f:
-                            if isinstance(content, str):
-                                f.write(content.encode('utf-8'))
-                            else:
-                                f.write(content)
-                        
-                        file_size = temp_file.stat().st_size
-                        logging.info(f"Saved file as: {temp_file} (Size: {file_size} bytes)")
-                        
-                        if file_size == 0:
-                            raise ValueError("File was created but is empty")
+                        if not temp_file.exists():
+                            raise FileNotFoundError(f"File was not created: {temp_file}")
                         
                         return temp_file
                         
                     except Exception as e:
-                        logging.error(f"Error handling attachment: {str(e)}")
-                        if raw_file.exists():
-                            raw_file.unlink()
-                        if 'temp_file' in locals() and temp_file.exists():
+                        logging.error(f"Error saving attachment: {str(e)}")
+                        if temp_file.exists():
                             temp_file.unlink()
                         raise
             
             # If we get here, we didn't find the right attachment
-            logging.error("Available attachments:")
-            for attachment in attachments:
-                logging.error(f"- {attachment.name} (Type: {type(attachment)})")
             raise ValueError("No NSX Daily Report attachment found in the email")
             
         except Exception as e:
