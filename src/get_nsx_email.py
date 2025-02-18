@@ -169,8 +169,8 @@ class NSXEmailProcessor:
         try:
             logger.info(f"Processing NSX Daily Report from: {excel_path}")
             
-            # Read the Excel file
-            df = pd.read_excel(excel_path, sheet_name="Bonds-Trading ATS")
+            # First read to find the header row
+            df = pd.read_excel(excel_path, sheet_name="Bonds-Trading ATS", header=None)
             
             # Find the header row by looking for 'Date' and 'Security'
             header_row = None
@@ -182,16 +182,13 @@ class NSXEmailProcessor:
             if header_row is None:
                 raise ValueError("Could not find header row with 'Date', 'Security', and 'Benchmark'")
             
-            # Read the data again using the found header row
+            # Now read the Excel file again, using the found header row as the header
             df_processed = pd.read_excel(
                 excel_path,
                 sheet_name="Bonds-Trading ATS",
-                header=header_row,
-                engine='openpyxl'
+                skiprows=header_row,  # Skip rows up to the header
+                header=0  # Use the first row (former header_row) as headers
             )
-            
-            # Clean up column names by removing any extra whitespace and newlines
-            df_processed.columns = df_processed.columns.str.strip().str.replace('\n', ' ')
             
             # Drop any completely empty rows
             df_processed.dropna(how='all', inplace=True)

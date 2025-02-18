@@ -73,7 +73,8 @@ def init_bloomberg_terminal():
 def get_bond_yields(session, bonds):
     """
     Fetch yield values for a list of bonds from the Bloomberg Terminal.
-    For each bond, retrieves both Bid and Ask Yield to Maturity (YTM) values.
+    For each bond, retrieves the Last Conventional Yield value.
+    Also fetches JIBAR data.
     
     Args:
         session: Active Bloomberg Terminal session
@@ -83,10 +84,9 @@ def get_bond_yields(session, bonds):
         list: List of dictionaries containing bond data:
             - Bond: Name of the bond
             - Bloomberg_ID: Bloomberg identifier
-            - Yield_Bid: YTM Bid value
-            - Yield_Ask: YTM Ask value
+            - Yield: Last Conventional Yield value
             - Timestamp: When the data was collected
-    """
+    """ 
     try:
         # Get the reference data service
         refdata_service = session.getService("//blp/refdata")
@@ -98,11 +98,13 @@ def get_bond_yields(session, bonds):
         for bond in bonds:
             request.append("securities", bond['ID'])
         
-        # Specify which yield values we want
-        request.append("fields", "YLD_YTM_BID")  # Yield to Maturity (Bid)
-        request.append("fields", "YLD_YTM_ASK")  # Yield to Maturity (Ask)
+        # Add JIBAR bond
+        request.append("securities", "JIBA3M Index")  # 3-month JIBAR
         
-        logger.info(f"Sending request for {len(bonds)} bonds")
+        # Specify which yield value we want
+        request.append("fields", "YLD_CNV_LAST")  # Last Conventional Yield
+        
+        logger.info(f"Sending request for {len(bonds) + 1} securities (including JIBAR)")
         
         # Send the request to Bloomberg
         session.sendRequest(request)
@@ -116,30 +118,31 @@ def get_bond_yields(session, bonds):
                 for msg in event:
                     security_data = msg.getElement("securityData")
                     
-                    # Process each bond's data
+                    # Process each security's data
                     for i in range(security_data.numValues()):
                         security = security_data.getValue(i)
                         ticker = security.getElement("security").getValue()
                         field_data = security.getElement("fieldData")
                         
-                        # Find the bond's name from our configuration
-                        bond_name = next((bond['Bond'] for bond in bonds if bond['ID'] == ticker), None)
+                        # Handle JIBAR separately
+                        if "JIBA3M" in ticker:
+                            bond_name = "3M JIBAR"
+                        else:
+                            # Find the bond's name from our configuration
+                            bond_name = next((bond['Bond'] for bond in bonds if bond['ID'] == ticker), None)
                         
                         try:
-                            # Get yield values
-                            yield_bid = field_data.getElement("YLD_YTM_BID").getValue()
-                            yield_ask = field_data.getElement("YLD_YTM_ASK").getValue()
+                            # Get yield value
+                            yield_value = field_data.getElement("YLD_CNV_LAST").getValue()
                         except Exception as e:
-                            yield_bid = None
-                            yield_ask = None
+                            yield_value = None
                             logger.warning(f"Could not get yield for {ticker}: {str(e)}")
                         
                         # Store the results
                         results.append({
                             'Bond': bond_name,
                             'Bloomberg_ID': ticker,
-                            'Yield_Bid': yield_bid,
-                            'Yield_Ask': yield_ask,
+                            'Yield': yield_value,
                             'Timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         })
                 
