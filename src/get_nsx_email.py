@@ -182,7 +182,7 @@ class NSXEmailProcessor:
             if header_row is None:
                 raise ValueError("Could not find header row with 'Date', 'Security', and 'Benchmark'")
             
-            # Use the header row as column names and get all data below it
+            # Read the data again using the found header row
             df_processed = pd.read_excel(
                 excel_path,
                 sheet_name="Bonds-Trading ATS",
@@ -190,10 +190,20 @@ class NSXEmailProcessor:
                 engine='openpyxl'
             )
             
+            # Clean up column names by removing any extra whitespace and newlines
+            df_processed.columns = df_processed.columns.str.strip().str.replace('\n', ' ')
+            
+            # Drop any completely empty rows
+            df_processed.dropna(how='all', inplace=True)
+            
+            # Reset the index after dropping rows
+            df_processed.reset_index(drop=True, inplace=True)
+            
             if df_processed.empty:
                 raise ValueError("No data found after headers in Bonds-Trading ATS sheet")
             
-            logger.info(f"Successfully processed bonds data. Found {len(df_processed)} rows")
+            # Log the column names to verify alignment
+            logger.info(f"Columns found in processed data: {df_processed.columns.tolist()}")
             
             # Clean up temporary file
             if Path(excel_path).parent.name == 'temp':
