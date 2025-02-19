@@ -17,8 +17,8 @@ def get_o365_account():
             _o365_account.authenticate()
     return _o365_account
 
-def send_error_email(error_message, source):
-    """Send error notification email using Office 365"""
+def send_workflow_email(subject: str, body: str):
+    """Send workflow status email using Office 365"""
     try:
         # Get O365 account
         account = get_o365_account()
@@ -28,17 +28,11 @@ def send_error_email(error_message, source):
         
         # Create message
         message = mailbox.new_message()
-        message.subject = f"Error in {source} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        message.subject = subject
         
-        body = f"""
-        An error occurred in {source}:
-        
-        {error_message}
-        
-        This message was sent after 3 failed attempts with 15-minute intervals.
-        """
-        
-        message.body = body
+        # Format the body with proper spacing
+        formatted_body = body.replace('\n', '\r\n')  # Ensure proper line breaks in email
+        message.body = formatted_body
         
         # Add recipients
         message.to.add([Config.ERROR_RECIPIENT_1, Config.ERROR_RECIPIENT_2, Config.ERROR_RECIPIENT_3])
@@ -46,45 +40,10 @@ def send_error_email(error_message, source):
         # Send message
         message.send()
         
-        logging.info(f"Error notification email sent for {source}")
+        logging.info(f"Status email sent with subject: {subject}")
         
     except Exception as e:
-        logging.error(f"Failed to send error email: {str(e)}")
-
-def send_success_email(workflow_name, summary_data=None):
-    """Send success notification email using Office 365"""
-    try:
-        # Get O365 account
-        account = get_o365_account()
-        
-        # Get mailbox
-        mailbox = account.mailbox()
-        
-        # Create message
-        message = mailbox.new_message()
-        message.subject = f"Success: {workflow_name} Completed - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        
-        body = f"""
-        The {workflow_name} workflow has completed successfully.
-        
-        Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-        """
-        
-        if summary_data:
-            body += f"\nSummary:\n{summary_data}"
-        
-        message.body = body
-        
-        # Add recipients
-        message.to.add([Config.ERROR_RECIPIENT_1, Config.ERROR_RECIPIENT_2, Config.ERROR_RECIPIENT_3])
-        
-        # Send message
-        message.send()
-        
-        logging.info(f"Success notification email sent for {workflow_name}")
-        
-    except Exception as e:
-        logging.error(f"Failed to send success email: {str(e)}")
+        logging.error(f"Failed to send status email: {str(e)}")
 
 def retry_with_notification(max_retries=3, delay_minutes=0.05):
     """Decorator for retrying functions with delay and email notification"""
@@ -103,7 +62,12 @@ def retry_with_notification(max_retries=3, delay_minutes=0.05):
                     else:
                         # Send error notification after all retries failed
                         error_message = f"Function {func.__name__} failed after {max_retries} attempts.\nLast error: {str(e)}"
-                        send_error_email(error_message, func.__name__)
+                        send_workflow_email(
+                            f"✗ Function Failed: {func.__name__}",
+                            f"Function execution failed after {max_retries} attempts.\n\n"
+                            f"Function: {func.__name__}\n"
+                            f"Error: {str(e)}"
+                        )
                         raise
             
         return wrapper

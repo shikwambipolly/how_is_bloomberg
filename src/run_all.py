@@ -3,7 +3,7 @@ from datetime import datetime
 from get_yields_terminal import run_terminal_workflow
 from get_nsx_email import run_nsx_workflow
 from get_IJG_daily import run_ijg_workflow
-from utils import send_error_email, send_success_email
+from utils import send_error_email, send_success_email, send_workflow_email
 from config import Config
 from typing import Optional
 import pandas as pd
@@ -118,63 +118,99 @@ def run_all_workflows():
         
         # Prepare email subject based on overall status
         if not failed_workflows:
-            subject = "✓ All Bond Data Collections Successful"
+            subject = "✓ Bond Data Collections: All Successful"
         elif not successful_workflows:
-            subject = "✗ All Bond Data Collections Failed"
+            subject = "✗ Bond Data Collections: All Failed"
         else:
-            subject = f"⚠ Bond Data Collections: {len(successful_workflows)} Success, {len(failed_workflows)} Failed"
+            subject = f"⚠ Bond Data Collections: {len(successful_workflows)} Successful, {len(failed_workflows)} Failed"
         
         # Prepare summary of all workflows
-        summary_lines = ["Daily Bond Data Collection Report:"]
-        summary_lines.append(f"\nDate: {datetime.now().strftime('%Y-%m-%d')}")
-        summary_lines.append(f"Time: {datetime.now().strftime('%H:%M:%S')}")
+        summary_lines = []
+        
+        # Header
+        summary_lines.extend([
+            "DAILY BOND DATA COLLECTION REPORT",
+            "=" * 35,
+            "",
+            f"Date: {datetime.now().strftime('%Y-%m-%d')}",
+            f"Time: {datetime.now().strftime('%H:%M:%S')}",
+            "",
+            "WORKFLOW STATUS",
+            "=" * 14,
+            ""
+        ])
         
         # Add successful workflows section if any
         if successful_workflows:
-            summary_lines.append("\nSuccessful Collections:")
+            summary_lines.append("Successful Collections:")
             
             # Bloomberg summary
             if collector.workflow_status['bloomberg']:
-                summary_lines.append(f"✓ Bloomberg Terminal:")
-                summary_lines.append(f"  - Collected data for {len(collector.bloomberg_data)} bonds")
+                summary_lines.extend([
+                    f"  ✓ Bloomberg Terminal",
+                    f"     • Collected data for {len(collector.bloomberg_data)} bonds",
+                    ""
+                ])
             
             # NSX summary
             if collector.workflow_status['nsx']:
-                summary_lines.append(f"✓ NSX Daily Report:")
-                summary_lines.append(f"  - Processed {len(collector.nsx_data)} rows")
+                summary_lines.extend([
+                    f"  ✓ NSX Daily Report",
+                    f"     • Processed {len(collector.nsx_data)} rows",
+                    ""
+                ])
             
             # IJG summary
             if collector.workflow_status['ijg']:
-                summary_lines.append(f"✓ IJG Daily Report:")
-                summary_lines.append(f"  - Yields data: {len(collector.ijg_yields_data) if collector.ijg_yields_data is not None else 0} rows")
-                summary_lines.append(f"  - Spread data: {len(collector.ijg_spread_data) if collector.ijg_spread_data is not None else 0} rows")
+                summary_lines.extend([
+                    f"  ✓ IJG Daily Report",
+                    f"     • Yields data: {len(collector.ijg_yields_data) if collector.ijg_yields_data is not None else 0} rows",
+                    f"     • Spread data: {len(collector.ijg_spread_data) if collector.ijg_spread_data is not None else 0} rows",
+                    ""
+                ])
         
         # Add failed workflows section if any
         if failed_workflows:
-            summary_lines.append("\nFailed Collections:")
-            for workflow in failed_workflows:
-                summary_lines.append(f"✗ {workflow.title()}")
+            summary_lines.extend([
+                "Failed Collections:",
+                *[f"  ✗ {workflow.title()}" for workflow in failed_workflows],
+                ""
+            ])
         
         # Add overall statistics
-        summary_lines.append(f"\nOverall Statistics:")
-        summary_lines.append(f"- Total workflows: {len(collector.workflow_status)}")
-        summary_lines.append(f"- Successful: {len(successful_workflows)}")
-        summary_lines.append(f"- Failed: {len(failed_workflows)}")
+        summary_lines.extend([
+            "SUMMARY",
+            "=" * 7,
+            f"Total workflows: {len(collector.workflow_status)}",
+            f"Successful: {len(successful_workflows)}",
+            f"Failed: {len(failed_workflows)}"
+        ])
         
-        # Send the single status email
-        send_success_email(subject, "\n".join(summary_lines))
+        # Send the status email
+        send_workflow_email(subject, "\n".join(summary_lines))
         
         return collector
         
     except Exception as e:
         error_message = f"Error in master workflow: {str(e)}"
         logging.error(error_message)
-        # Don't send a separate error email since we want only one email per run
-        send_success_email("✗ Bond Data Collections: Critical Error", 
-                         f"Daily Bond Data Collection Report:\n\n"
-                         f"Date: {datetime.now().strftime('%Y-%m-%d')}\n"
-                         f"Time: {datetime.now().strftime('%H:%M:%S')}\n\n"
-                         f"A critical error occurred in the master workflow:\n{str(e)}")
+        
+        # Send email for critical error
+        error_lines = [
+            "DAILY BOND DATA COLLECTION REPORT",
+            "=" * 35,
+            "",
+            f"Date: {datetime.now().strftime('%Y-%m-%d')}",
+            f"Time: {datetime.now().strftime('%H:%M:%S')}",
+            "",
+            "CRITICAL ERROR",
+            "=" * 13,
+            "",
+            "A critical error occurred in the master workflow:",
+            str(e)
+        ]
+        
+        send_workflow_email("✗ Bond Data Collections: Critical Error", "\n".join(error_lines))
         return None
 
 def process_collected_data(collector: DataCollector):
