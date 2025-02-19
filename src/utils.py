@@ -41,7 +41,7 @@ def send_error_email(error_message, source):
         message.body = body
         
         # Add recipients
-        message.to.add([Config.ERROR_RECIPIENT_1, Config.ERROR_RECIPIENT_2])
+        message.to.add([Config.ERROR_RECIPIENT_1, Config.ERROR_RECIPIENT_2, Config.ERROR_RECIPIENT_3])
         
         # Send message
         message.send()
@@ -50,6 +50,41 @@ def send_error_email(error_message, source):
         
     except Exception as e:
         logging.error(f"Failed to send error email: {str(e)}")
+
+def send_success_email(workflow_name, summary_data=None):
+    """Send success notification email using Office 365"""
+    try:
+        # Get O365 account
+        account = get_o365_account()
+        
+        # Get mailbox
+        mailbox = account.mailbox()
+        
+        # Create message
+        message = mailbox.new_message()
+        message.subject = f"Success: {workflow_name} Completed - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        
+        body = f"""
+        The {workflow_name} workflow has completed successfully.
+        
+        Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+        """
+        
+        if summary_data:
+            body += f"\nSummary:\n{summary_data}"
+        
+        message.body = body
+        
+        # Add recipients
+        message.to.add([Config.ERROR_RECIPIENT_1, Config.ERROR_RECIPIENT_2, Config.ERROR_RECIPIENT_3])
+        
+        # Send message
+        message.send()
+        
+        logging.info(f"Success notification email sent for {workflow_name}")
+        
+    except Exception as e:
+        logging.error(f"Failed to send success email: {str(e)}")
 
 def retry_with_notification(max_retries=3, delay_minutes=0.05):
     """Decorator for retrying functions with delay and email notification"""

@@ -3,7 +3,7 @@ from datetime import datetime
 from get_yields_terminal import run_terminal_workflow
 from get_nsx_email import run_nsx_workflow
 from get_IJG_daily import run_ijg_workflow
-from utils import send_error_email
+from utils import send_error_email, send_success_email
 from config import Config
 from typing import Optional
 import pandas as pd
@@ -112,22 +112,69 @@ def run_all_workflows():
         ijg_result = run_ijg_workflow()
         collector.store_data('ijg', ijg_result)
         
-        # Check for any failures
+        # Get successful and failed workflows
         failed_workflows = collector.get_failed_workflows()
+        successful_workflows = [name for name, status in collector.workflow_status.items() if status]
         
-        if failed_workflows:
-            error_message = f"The following workflows failed: {', '.join(failed_workflows)}"
-            logging.error(error_message)
-            send_error_email(error_message, "Master Workflow")
+        # Prepare email subject based on overall status
+        if not failed_workflows:
+            subject = "✓ All Bond Data Collections Successful"
+        elif not successful_workflows:
+            subject = "✗ All Bond Data Collections Failed"
         else:
-            logging.info("All workflows completed successfully")
+            subject = f"⚠ Bond Data Collections: {len(successful_workflows)} Success, {len(failed_workflows)} Failed"
+        
+        # Prepare summary of all workflows
+        summary_lines = ["Daily Bond Data Collection Report:"]
+        summary_lines.append(f"\nDate: {datetime.now().strftime('%Y-%m-%d')}")
+        summary_lines.append(f"Time: {datetime.now().strftime('%H:%M:%S')}")
+        
+        # Add successful workflows section if any
+        if successful_workflows:
+            summary_lines.append("\nSuccessful Collections:")
+            
+            # Bloomberg summary
+            if collector.workflow_status['bloomberg']:
+                summary_lines.append(f"✓ Bloomberg Terminal:")
+                summary_lines.append(f"  - Collected data for {len(collector.bloomberg_data)} bonds")
+            
+            # NSX summary
+            if collector.workflow_status['nsx']:
+                summary_lines.append(f"✓ NSX Daily Report:")
+                summary_lines.append(f"  - Processed {len(collector.nsx_data)} rows")
+            
+            # IJG summary
+            if collector.workflow_status['ijg']:
+                summary_lines.append(f"✓ IJG Daily Report:")
+                summary_lines.append(f"  - Yields data: {len(collector.ijg_yields_data) if collector.ijg_yields_data is not None else 0} rows")
+                summary_lines.append(f"  - Spread data: {len(collector.ijg_spread_data) if collector.ijg_spread_data is not None else 0} rows")
+        
+        # Add failed workflows section if any
+        if failed_workflows:
+            summary_lines.append("\nFailed Collections:")
+            for workflow in failed_workflows:
+                summary_lines.append(f"✗ {workflow.title()}")
+        
+        # Add overall statistics
+        summary_lines.append(f"\nOverall Statistics:")
+        summary_lines.append(f"- Total workflows: {len(collector.workflow_status)}")
+        summary_lines.append(f"- Successful: {len(successful_workflows)}")
+        summary_lines.append(f"- Failed: {len(failed_workflows)}")
+        
+        # Send the single status email
+        send_success_email(subject, "\n".join(summary_lines))
         
         return collector
         
     except Exception as e:
         error_message = f"Error in master workflow: {str(e)}"
         logging.error(error_message)
-        send_error_email(error_message, "Master Workflow")
+        # Don't send a separate error email since we want only one email per run
+        send_success_email("✗ Bond Data Collections: Critical Error", 
+                         f"Daily Bond Data Collection Report:\n\n"
+                         f"Date: {datetime.now().strftime('%Y-%m-%d')}\n"
+                         f"Time: {datetime.now().strftime('%H:%M:%S')}\n\n"
+                         f"A critical error occurred in the master workflow:\n{str(e)}")
         return None
 
 def process_collected_data(collector: DataCollector):

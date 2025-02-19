@@ -25,6 +25,7 @@ class Config:
     # Error notification configuration
     ERROR_RECIPIENT_1 = os.getenv('ERROR_RECIPIENT_1')
     ERROR_RECIPIENT_2 = os.getenv('ERROR_RECIPIENT_2')
+    ERROR_RECIPIENT_3 = os.getenv('ERROR_RECIPIENT_3')
 
     @classmethod
     def validate(cls):
@@ -34,6 +35,7 @@ class Config:
             ('O365_CLIENT_SECRET', cls.O365_CLIENT_SECRET),
             ('ERROR_RECIPIENT_1', cls.ERROR_RECIPIENT_1),
             ('ERROR_RECIPIENT_2', cls.ERROR_RECIPIENT_2),
+            ('ERROR_RECIPIENT_3', cls.ERROR_RECIPIENT_3),
             ('IJG_DAILY_PATH', cls.IJG_DAILY_PATH),
         ]
 
