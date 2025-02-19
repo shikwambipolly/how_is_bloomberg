@@ -190,24 +190,17 @@ class NSXEmailProcessor:
                 header=0  # Use the first row (former header_row) as headers
             )
             
-            # Clean up column names and handle merged cells
+            # Clean up column names
             df_processed.columns = df_processed.columns.map(lambda x: str(x).strip())
             
-            # Identify the Prev Mark To (Yield) column
-            prev_mark_col = None
-            for col in df_processed.columns:
-                if 'Prev Mark To' in str(col) and 'Yield' in str(col):
-                    prev_mark_col = col
-                    break
+            # Rename 'Unnamed: 7' to 'Prev Mark To (Yield)'
+            unnamed_cols = [col for col in df_processed.columns if 'Unnamed: 7' in col]
+            if unnamed_cols:
+                df_processed.rename(columns={unnamed_cols[0]: 'Prev Mark To (Yield)'}, inplace=True)
             
-            if prev_mark_col:
-                # Create a clean column name
-                new_col_name = 'Prev Mark To (Yield)'
-                # Rename the column
-                df_processed.rename(columns={prev_mark_col: new_col_name}, inplace=True)
-                
-                # Ensure the data in this column is numeric
-                df_processed[new_col_name] = pd.to_numeric(df_processed[new_col_name], errors='coerce')
+            # Remove all remaining unnamed columns
+            unnamed_cols = [col for col in df_processed.columns if 'Unnamed' in col]
+            df_processed.drop(columns=unnamed_cols, inplace=True)
             
             # Drop any completely empty rows
             df_processed.dropna(how='all', inplace=True)
