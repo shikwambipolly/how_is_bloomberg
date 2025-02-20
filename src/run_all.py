@@ -4,7 +4,7 @@ from get_yields_terminal import run_terminal_workflow
 from get_nsx_email import run_nsx_workflow
 from get_IJG_daily import run_ijg_workflow
 from process_closing_yields import run_closing_yields_workflow
-from utils import send_error_email, send_success_email, send_workflow_email
+from utils import send_workflow_email
 from config import Config
 from typing import Optional
 import pandas as pd

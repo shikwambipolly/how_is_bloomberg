@@ -74,7 +74,7 @@ def get_bond_yields(session, bonds):
     """
     Fetch yield values for a list of bonds from the Bloomberg Terminal.
     For each bond, retrieves the Last Conventional Yield value.
-    Also fetches JIBAR data.
+    Also fetches JIBAR data separately using PX_LAST.
     
     Args:
         session: Active Bloomberg Terminal session
@@ -84,33 +84,29 @@ def get_bond_yields(session, bonds):
         list: List of dictionaries containing bond data:
             - Bond: Name of the bond
             - Bloomberg_ID: Bloomberg identifier
-            - Yield: Last Conventional Yield value
+            - Yield: Last Conventional Yield value or PX_LAST for JIBAR
             - Timestamp: When the data was collected
     """ 
     try:
-        # Get the reference data service
+        results = []
         refdata_service = session.getService("//blp/refdata")
         
-        # Create a new data request
+        # First request: Get yields for regular bonds
         request = refdata_service.createRequest("ReferenceDataRequest")
         
         # Add each bond's ID to the request
         for bond in bonds:
             request.append("securities", bond['ID'])
         
-        # Add JIBAR bond
-        request.append("securities", "JIBA3M Index")  # 3-month JIBAR
-        
         # Specify which yield value we want
         request.append("fields", "YLD_CNV_LAST")  # Last Conventional Yield
         
-        logger.info(f"Sending request for {len(bonds) + 1} securities (including JIBAR)")
+        logger.info(f"Sending request for {len(bonds)} regular bonds")
         
         # Send the request to Bloomberg
         session.sendRequest(request)
         
-        # Process the response
-        results = []
+        # Process the response for regular bonds
         while True:
             event = session.nextEvent(500)  # Wait up to 500ms for response
             
@@ -124,12 +120,8 @@ def get_bond_yields(session, bonds):
                         ticker = security.getElement("security").getValue()
                         field_data = security.getElement("fieldData")
                         
-                        # Handle JIBAR separately
-                        if "JIBA3M" in ticker:
-                            bond_name = "3M JIBAR"
-                        else:
-                            # Find the bond's name from our configuration
-                            bond_name = next((bond['Bond'] for bond in bonds if bond['ID'] == ticker), None)
+                        # Find the bond's name from our configuration
+                        bond_name = next((bond['Bond'] for bond in bonds if bond['ID'] == ticker), None)
                         
                         try:
                             # Get yield value
@@ -147,7 +139,43 @@ def get_bond_yields(session, bonds):
                         })
                 
                 break  # Exit after processing the response
+        
+        # Second request: Get JIBAR data separately
+        jibar_request = refdata_service.createRequest("ReferenceDataRequest")
+        jibar_request.append("securities", "JIBA3M Index")
+        jibar_request.append("fields", "PX_LAST")
+        
+        logger.info("Sending request for JIBAR data")
+        
+        # Send the JIBAR request
+        session.sendRequest(jibar_request)
+        
+        # Process the JIBAR response
+        while True:
+            event = session.nextEvent(500)
+            
+            if event.eventType() == blpapi.Event.RESPONSE:
+                for msg in event:
+                    security_data = msg.getElement("securityData")
+                    security = security_data.getValue(0)
+                    field_data = security.getElement("fieldData")
+                    
+                    try:
+                        jibar_value = field_data.getElement("PX_LAST").getValue()
+                    except Exception as e:
+                        jibar_value = None
+                        logger.warning(f"Could not get JIBAR value: {str(e)}")
+                    
+                    # Add JIBAR to results
+                    results.append({
+                        'Bond': '3M JIBAR',
+                        'Bloomberg_ID': 'JIBA3M Index',
+                        'Yield': jibar_value,
+                        'Timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    })
                 
+                break
+        
         return results
     
     except Exception as e:
@@ -179,7 +207,7 @@ def run_terminal_workflow() -> WorkflowResult:
         # Fetch yield data
         results = get_bond_yields(session, bonds)
         
-        # Convert results to a DataFrame for easier handling
+        # Convert results to a DataFrame
         df = pd.DataFrame(results)
         
         # Save to CSV file with today's date
