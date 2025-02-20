@@ -60,6 +60,12 @@ class ClosingYieldsProcessor:
     def process_data(self) -> pd.DataFrame:
         """
         Process the input data to calculate closing yields.
+        Creates a new DataFrame with:
+        - Security (from NSX data)
+        - Benchmark (from NSX data)
+        - Benchmark Yield (from Bloomberg data, matched by benchmark name)
+        - Spread (from IJG spread data)
+        - Closing Yield (calculated as benchmark yield + spread/100)
         
         Returns:
             DataFrame containing the processed closing yields
@@ -67,11 +73,58 @@ class ClosingYieldsProcessor:
         try:
             logger.info("Starting closing yields calculation")
             
-            # TODO: Implement the specific processing logic here
-            # This is where we'll add the calculation logic in the next step
+            # Create new DataFrame with Security and Benchmark from NSX data
+            closing_yields_df = pd.DataFrame({
+                'Security': self.nsx_data['Security'],
+                'Benchmark': self.nsx_data['Benchmark']
+            })
             
-            logger.info("Closing yields calculation completed successfully")
-            return pd.DataFrame()  # Placeholder return
+            # Create a mapping of bond names to yields from Bloomberg data
+            bloomberg_yields = {}
+            for _, row in self.bloomberg_data.iterrows():
+                if pd.notna(row['Bond']) and pd.notna(row['Yield']):
+                    bloomberg_yields[row['Bond']] = row['Yield']
+            
+            logger.info(f"Created yield mapping for {len(bloomberg_yields)} bonds from Bloomberg")
+            
+            # Fill in Benchmark Yield column by matching benchmark names
+            closing_yields_df['Benchmark Yield'] = closing_yields_df['Benchmark'].map(bloomberg_yields)
+            
+            # Copy Spread column from IJG spread data
+            # First create a mapping of security to spread from IJG data
+            ijg_spreads = {}
+            for _, row in self.ijg_spread_data.iterrows():
+                if 'Security' in row and 'Spread' in row:  # Ensure columns exist
+                    if pd.notna(row['Security']) and pd.notna(row['Spread']):
+                        ijg_spreads[row['Security']] = row['Spread']
+            
+            # Add Spread column
+            closing_yields_df['Spread'] = closing_yields_df['Security'].map(ijg_spreads)
+            
+            # Calculate Closing Yield
+            closing_yields_df['Closing Yield'] = closing_yields_df.apply(
+                lambda row: row['Benchmark Yield'] + (row['Spread']/100) 
+                if pd.notna(row['Benchmark Yield']) and pd.notna(row['Spread']) 
+                else None, 
+                axis=1
+            )
+            
+            # Log summary statistics
+            logger.info(f"Processed {len(closing_yields_df)} bonds")
+            logger.info(f"Found benchmark yields for {closing_yields_df['Benchmark Yield'].notna().sum()} bonds")
+            logger.info(f"Found spreads for {closing_yields_df['Spread'].notna().sum()} bonds")
+            logger.info(f"Calculated closing yields for {closing_yields_df['Closing Yield'].notna().sum()} bonds")
+            
+            # Log any missing data
+            missing_benchmark_yields = closing_yields_df[closing_yields_df['Benchmark Yield'].isna()]['Security'].tolist()
+            missing_spreads = closing_yields_df[closing_yields_df['Spread'].isna()]['Security'].tolist()
+            
+            if missing_benchmark_yields:
+                logger.warning(f"Missing benchmark yields for securities: {missing_benchmark_yields}")
+            if missing_spreads:
+                logger.warning(f"Missing spreads for securities: {missing_spreads}")
+            
+            return closing_yields_df
             
         except Exception as e:
             logger.error(f"Error processing closing yields: {str(e)}")

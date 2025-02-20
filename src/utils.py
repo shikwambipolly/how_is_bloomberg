@@ -18,7 +18,14 @@ def get_o365_account():
     return _o365_account
 
 def send_workflow_email(subject: str, body: str):
-    """Send workflow status email using Office 365"""
+    """
+    Send workflow status email using Office 365.
+    Ensures proper formatting of line breaks in the email body.
+    
+    Args:
+        subject: Email subject line
+        body: Email body text with line breaks (\n)
+    """
     try:
         # Get O365 account
         account = get_o365_account()
@@ -30,8 +37,22 @@ def send_workflow_email(subject: str, body: str):
         message = mailbox.new_message()
         message.subject = subject
         
-        # Set the body (no need for additional formatting as \n is handled properly)
-        message.body = body
+        # Format the body with HTML to preserve line breaks
+        html_body = body.replace('\n', '<br>')
+        message.body = f"""
+        <html>
+        <body>
+        <pre style="font-family: Consolas, 'Courier New', monospace; white-space: pre-wrap;">
+{body}
+        </pre>
+        </body>
+        </html>
+        """
+        
+        # Set content type to HTML
+        message._Message__message.body = message.body
+        message._Message__message.bodyPreview = body
+        message._Message__message.contentType = 'HTML'
         
         # Add recipients
         message.to.add([Config.ERROR_RECIPIENT_1, Config.ERROR_RECIPIENT_2, Config.ERROR_RECIPIENT_3])
