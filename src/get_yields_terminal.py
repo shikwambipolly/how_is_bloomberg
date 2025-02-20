@@ -75,6 +75,7 @@ def get_bond_yields(session, bonds):
     Fetch yield values for a list of bonds from the Bloomberg Terminal.
     For each bond, retrieves the Last Conventional Yield value.
     Also fetches JIBAR data separately using PX_LAST.
+    Processes bonds in batches of maximum 10 securities per request.
     
     Args:
         session: Active Bloomberg Terminal session
@@ -91,56 +92,60 @@ def get_bond_yields(session, bonds):
         results = []
         refdata_service = session.getService("//blp/refdata")
         
-        # First request: Get yields for regular bonds
-        request = refdata_service.createRequest("ReferenceDataRequest")
-        
-        # Add each bond's ID to the request
-        for bond in bonds:
-            request.append("securities", bond['ID'])
-        
-        # Specify which yield value we want
-        request.append("fields", "YLD_CNV_LAST")  # Last Conventional Yield
-        
-        logger.info(f"Sending request for {len(bonds)} regular bonds")
-        
-        # Send the request to Bloomberg
-        session.sendRequest(request)
-        
-        # Process the response for regular bonds
-        while True:
-            event = session.nextEvent(500)  # Wait up to 500ms for response
+        # Process regular bonds in batches of 10
+        for i in range(0, len(bonds), 10):
+            batch = bonds[i:i+10]
             
-            if event.eventType() == blpapi.Event.RESPONSE:
-                for msg in event:
-                    security_data = msg.getElement("securityData")
-                    
-                    # Process each security's data
-                    for i in range(security_data.numValues()):
-                        security = security_data.getValue(i)
-                        ticker = security.getElement("security").getValue()
-                        field_data = security.getElement("fieldData")
-                        
-                        # Find the bond's name from our configuration
-                        bond_name = next((bond['Bond'] for bond in bonds if bond['ID'] == ticker), None)
-                        
-                        try:
-                            # Get yield value
-                            yield_value = field_data.getElement("YLD_CNV_LAST").getValue()
-                        except Exception as e:
-                            yield_value = None
-                            logger.warning(f"Could not get yield for {ticker}: {str(e)}")
-                        
-                        # Store the results
-                        results.append({
-                            'Bond': bond_name,
-                            'Bloomberg_ID': ticker,
-                            'Yield': yield_value,
-                            'Timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        })
+            # Create request for this batch
+            request = refdata_service.createRequest("ReferenceDataRequest")
+            
+            # Add each bond's ID to the request
+            for bond in batch:
+                request.append("securities", bond['ID'])
+            
+            # Specify which yield value we want
+            request.append("fields", "YLD_CNV_LAST")  # Last Conventional Yield
+            
+            logger.info(f"Sending request for batch of {len(batch)} bonds (bonds {i+1} to {i+len(batch)})")
+            
+            # Send the request to Bloomberg
+            session.sendRequest(request)
+            
+            # Process the response for this batch
+            while True:
+                event = session.nextEvent(500)  # Wait up to 500ms for response
                 
-                break  # Exit after processing the response
+                if event.eventType() == blpapi.Event.RESPONSE:
+                    for msg in event:
+                        security_data = msg.getElement("securityData")
+                        
+                        # Process each security's data
+                        for j in range(security_data.numValues()):
+                            security = security_data.getValue(j)
+                            ticker = security.getElement("security").getValue()
+                            field_data = security.getElement("fieldData")
+                            
+                            # Find the bond's name from our configuration
+                            bond_name = next((bond['Bond'] for bond in batch if bond['ID'] == ticker), None)
+                            
+                            try:
+                                # Get yield value
+                                yield_value = field_data.getElement("YLD_CNV_LAST").getValue()
+                            except Exception as e:
+                                yield_value = None
+                                logger.warning(f"Could not get yield for {ticker}: {str(e)}")
+                            
+                            # Store the results
+                            results.append({
+                                'Bond': bond_name,
+                                'Bloomberg_ID': ticker,
+                                'Yield': yield_value,
+                                'Timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            })
+                    
+                    break  # Exit after processing the response
         
-        # Second request: Get JIBAR data separately
+        # Finally, get JIBAR data separately
         jibar_request = refdata_service.createRequest("ReferenceDataRequest")
         jibar_request.append("securities", "JIBA3M Index")
         jibar_request.append("fields", "PX_LAST")
@@ -175,6 +180,9 @@ def get_bond_yields(session, bonds):
                     })
                 
                 break
+        
+        # Log the total number of results collected
+        logger.info(f"Total bonds collected: {len(results)} (including JIBAR)")
         
         return results
     
