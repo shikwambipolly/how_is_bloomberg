@@ -30,9 +30,8 @@ def send_workflow_email(subject: str, body: str):
         message = mailbox.new_message()
         message.subject = subject
         
-        # Format the body with proper spacing
-        formatted_body = body.replace('\n', '\r\n')  # Ensure proper line breaks in email
-        message.body = formatted_body
+        # Set the body (no need for additional formatting as \n is handled properly)
+        message.body = body
         
         # Add recipients
         message.to.add([Config.ERROR_RECIPIENT_1, Config.ERROR_RECIPIENT_2, Config.ERROR_RECIPIENT_3])
@@ -61,12 +60,13 @@ def retry_with_notification(max_retries=3, delay_minutes=0.05):
                         time.sleep(delay_minutes * 60)
                     else:
                         # Send error notification after all retries failed
-                        error_message = f"Function {func.__name__} failed after {max_retries} attempts.\nLast error: {str(e)}"
+                        error_body = f"Function execution failed after {max_retries} attempts.\n\n"
+                        error_body += f"Function: {func.__name__}\n"
+                        error_body += f"Error: {str(e)}"
+                        
                         send_workflow_email(
                             f"✗ Function Failed: {func.__name__}",
-                            f"Function execution failed after {max_retries} attempts.\n\n"
-                            f"Function: {func.__name__}\n"
-                            f"Error: {str(e)}"
+                            error_body
                         )
                         raise
             

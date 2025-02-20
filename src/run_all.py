@@ -3,6 +3,7 @@ from datetime import datetime
 from get_yields_terminal import run_terminal_workflow
 from get_nsx_email import run_nsx_workflow
 from get_IJG_daily import run_ijg_workflow
+from process_closing_yields import run_closing_yields_workflow
 from utils import send_error_email, send_success_email, send_workflow_email
 from config import Config
 from typing import Optional
@@ -22,10 +23,12 @@ class DataCollector:
         self.nsx_data: Optional[pd.DataFrame] = None
         self.ijg_yields_data: Optional[pd.DataFrame] = None
         self.ijg_spread_data: Optional[pd.DataFrame] = None
+        self.closing_yields_data: Optional[pd.DataFrame] = None
         self.workflow_status = {
             'bloomberg': False,
             'nsx': False,
-            'ijg': False
+            'ijg': False,
+            'closing_yields': False
         }
     
     def store_data(self, source: str, result: WorkflowResult):
@@ -112,7 +115,20 @@ def run_all_workflows():
         ijg_result = run_ijg_workflow()
         collector.store_data('ijg', ijg_result)
         
-        # Get successful and failed workflows
+        # Check if all data collection workflows were successful
+        initial_workflows = ['bloomberg', 'nsx', 'ijg']
+        initial_failed = [name for name in initial_workflows if not collector.workflow_status[name]]
+        
+        if not initial_failed:
+            # Run closing yields workflow only if all other workflows succeeded
+            logging.info("Starting Closing Yields workflow...")
+            closing_yields_result = run_closing_yields_workflow(collector)
+            collector.store_data('closing_yields', closing_yields_result)
+        else:
+            logging.error("Skipping Closing Yields workflow due to failed data collection workflows")
+            collector.workflow_status['closing_yields'] = False
+        
+        # Get final workflow status
         failed_workflows = collector.get_failed_workflows()
         successful_workflows = [name for name, status in collector.workflow_status.items() if status]
         
@@ -124,70 +140,55 @@ def run_all_workflows():
         else:
             subject = f"⚠ Bond Data Collections: {len(successful_workflows)} Successful, {len(failed_workflows)} Failed"
         
-        # Prepare summary of all workflows
-        summary_lines = []
-        
-        # Header
-        summary_lines.extend([
-            "DAILY BOND DATA COLLECTION REPORT",
-            "=" * 35,
-            "",
-            f"Date: {datetime.now().strftime('%Y-%m-%d')}",
-            f"Time: {datetime.now().strftime('%H:%M:%S')}",
-            "",
-            "WORKFLOW STATUS",
-            "=" * 14,
-            ""
-        ])
+        # Build email body
+        body = "DAILY BOND DATA COLLECTION REPORT\n"
+        body += "===================================\n\n"
+        body += f"Date: {datetime.now().strftime('%Y-%m-%d')}\n"
+        body += f"Time: {datetime.now().strftime('%H:%M:%S')}\n\n"
+        body += "WORKFLOW STATUS\n"
+        body += "==============\n\n"
         
         # Add successful workflows section if any
         if successful_workflows:
-            summary_lines.append("Successful Collections:")
+            body += "Successful Collections:\n"
             
             # Bloomberg summary
             if collector.workflow_status['bloomberg']:
-                summary_lines.extend([
-                    f"  ✓ Bloomberg Terminal",
-                    f"     • Collected data for {len(collector.bloomberg_data)} bonds",
-                    ""
-                ])
+                body += "  ✓ Bloomberg Terminal\n"
+                body += f"     • Collected data for {len(collector.bloomberg_data)} bonds\n\n"
             
             # NSX summary
             if collector.workflow_status['nsx']:
-                summary_lines.extend([
-                    f"  ✓ NSX Daily Report",
-                    f"     • Processed {len(collector.nsx_data)} rows",
-                    ""
-                ])
+                body += "  ✓ NSX Daily Report\n"
+                body += f"     • Processed {len(collector.nsx_data)} rows\n\n"
             
             # IJG summary
             if collector.workflow_status['ijg']:
-                summary_lines.extend([
-                    f"  ✓ IJG Daily Report",
-                    f"     • Yields data: {len(collector.ijg_yields_data) if collector.ijg_yields_data is not None else 0} rows",
-                    f"     • Spread data: {len(collector.ijg_spread_data) if collector.ijg_spread_data is not None else 0} rows",
-                    ""
-                ])
+                body += "  ✓ IJG Daily Report\n"
+                body += f"     • Yields data: {len(collector.ijg_yields_data) if collector.ijg_yields_data is not None else 0} rows\n"
+                body += f"     • Spread data: {len(collector.ijg_spread_data) if collector.ijg_spread_data is not None else 0} rows\n\n"
+            
+            # Closing Yields summary
+            if collector.workflow_status['closing_yields']:
+                body += "  ✓ Closing Yields Processing\n"
+                body += f"     • Processed {len(collector.closing_yields_data)} bonds\n\n"
         
         # Add failed workflows section if any
         if failed_workflows:
-            summary_lines.extend([
-                "Failed Collections:",
-                *[f"  ✗ {workflow.title()}" for workflow in failed_workflows],
-                ""
-            ])
+            body += "Failed Collections:\n"
+            for workflow in failed_workflows:
+                body += f"  ✗ {workflow.title()}\n"
+            body += "\n"
         
         # Add overall statistics
-        summary_lines.extend([
-            "SUMMARY",
-            "=" * 7,
-            f"Total workflows: {len(collector.workflow_status)}",
-            f"Successful: {len(successful_workflows)}",
-            f"Failed: {len(failed_workflows)}"
-        ])
+        body += "SUMMARY\n"
+        body += "=======\n"
+        body += f"Total workflows: {len(collector.workflow_status)}\n"
+        body += f"Successful: {len(successful_workflows)}\n"
+        body += f"Failed: {len(failed_workflows)}"
         
         # Send the status email
-        send_workflow_email(subject, "\n".join(summary_lines))
+        send_workflow_email(subject, body)
         
         return collector
         
@@ -196,21 +197,16 @@ def run_all_workflows():
         logging.error(error_message)
         
         # Send email for critical error
-        error_lines = [
-            "DAILY BOND DATA COLLECTION REPORT",
-            "=" * 35,
-            "",
-            f"Date: {datetime.now().strftime('%Y-%m-%d')}",
-            f"Time: {datetime.now().strftime('%H:%M:%S')}",
-            "",
-            "CRITICAL ERROR",
-            "=" * 13,
-            "",
-            "A critical error occurred in the master workflow:",
-            str(e)
-        ]
+        error_body = "DAILY BOND DATA COLLECTION REPORT\n"
+        error_body += "===================================\n\n"
+        error_body += f"Date: {datetime.now().strftime('%Y-%m-%d')}\n"
+        error_body += f"Time: {datetime.now().strftime('%H:%M:%S')}\n\n"
+        error_body += "CRITICAL ERROR\n"
+        error_body += "==============\n\n"
+        error_body += "A critical error occurred in the master workflow:\n"
+        error_body += str(e)
         
-        send_workflow_email("✗ Bond Data Collections: Critical Error", "\n".join(error_lines))
+        send_workflow_email("✗ Bond Data Collections: Critical Error", error_body)
         return None
 
 def process_collected_data(collector: DataCollector):
@@ -262,3 +258,5 @@ if __name__ == "__main__":
         if ijg_spread_df is not None:
             print("\nIJG Spread Data Preview:")
             print(ijg_spread_df.head()) 
+        
+        
