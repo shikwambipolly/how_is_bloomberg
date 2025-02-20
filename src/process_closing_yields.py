@@ -64,7 +64,7 @@ class ClosingYieldsProcessor:
         - Security (from NSX data)
         - Benchmark (from NSX data)
         - Benchmark Yield (from Bloomberg data, matched by benchmark name)
-        - Spread (from IJG spread data)
+        - Spread (from IJG spread data, matched by Government column)
         - Closing Yield (calculated as benchmark yield + spread/100)
         
         Returns:
@@ -91,14 +91,16 @@ class ClosingYieldsProcessor:
             closing_yields_df['Benchmark Yield'] = closing_yields_df['Benchmark'].map(bloomberg_yields)
             
             # Copy Spread column from IJG spread data
-            # First create a mapping of security to spread from IJG data
+            # Create a mapping of government bonds to spreads from IJG data
             ijg_spreads = {}
             for _, row in self.ijg_spread_data.iterrows():
-                if 'Security' in row and 'Spread' in row:  # Ensure columns exist
-                    if pd.notna(row['Security']) and pd.notna(row['Spread']):
-                        ijg_spreads[row['Security']] = row['Spread']
+                if 'Government' in row.index and 'Spread' in row.index:  # Ensure columns exist
+                    if pd.notna(row['Government']) and pd.notna(row['Spread']):
+                        ijg_spreads[row['Government']] = row['Spread']
             
-            # Add Spread column
+            logger.info(f"Created spread mapping for {len(ijg_spreads)} bonds from IJG data")
+            
+            # Add Spread column by matching Security with Government column
             closing_yields_df['Spread'] = closing_yields_df['Security'].map(ijg_spreads)
             
             # Calculate Closing Yield
@@ -123,6 +125,15 @@ class ClosingYieldsProcessor:
                 logger.warning(f"Missing benchmark yields for securities: {missing_benchmark_yields}")
             if missing_spreads:
                 logger.warning(f"Missing spreads for securities: {missing_spreads}")
+            
+            # Log the mappings for debugging
+            logger.debug("Bloomberg yields mapping:")
+            for bond, yield_value in bloomberg_yields.items():
+                logger.debug(f"{bond}: {yield_value}")
+            
+            logger.debug("IJG spreads mapping:")
+            for gov, spread in ijg_spreads.items():
+                logger.debug(f"{gov}: {spread}")
             
             return closing_yields_df
             
