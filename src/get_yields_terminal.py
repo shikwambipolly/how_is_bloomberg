@@ -131,6 +131,9 @@ def get_bond_yields(session, bonds):
                 
                 if event.eventType() == blpapi.Event.RESPONSE:
                     for msg in event:
+                        if not msg.hasElement("securityData"):
+                            logger.warning("Message does not contain 'securityData' element, skipping.")
+                            continue
                         # Get the securityData element
                         securityDataElem = msg.getElement("securityData")
                         # Iterate over each security data element using numValues()
@@ -197,6 +200,9 @@ def get_bond_yields(session, bonds):
             
             if event.eventType() == blpapi.Event.RESPONSE:
                 for msg in event:
+                    if not msg.hasElement("securityData"):
+                        logger.warning("JIBAR message does not contain 'securityData' element, skipping.")
+                        continue
                     # Process JIBAR data
                     securityDataElem = msg.getElement("securityData")
                     security_data = securityDataElem.getValueAsElement(0)
