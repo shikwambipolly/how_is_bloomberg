@@ -50,6 +50,9 @@ class DataCollector:
                         logging.error("Missing yields or spread data in IJG result")
                         self.workflow_status[source] = False
                         return
+            elif source == 'closing_yields':
+                self.closing_yields_data = result.data
+                logging.info(f"Successfully stored closing yields data with {len(self.closing_yields_data)} rows")
             
             self.workflow_status[source] = True
             if source != 'ijg':  # Already logged IJG data above
