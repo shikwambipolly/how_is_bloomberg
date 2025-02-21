@@ -131,34 +131,39 @@ def get_bond_yields(session, bonds):
                 
                 if event.eventType() == blpapi.Event.RESPONSE:
                     for msg in event:
-                        security_data = msg.getElement("securityData")
-                        
-                        # Process each security's data
-                        for j in range(security_data.numValues()):
-                            security = security_data.getValue(j)
-                            ticker = security.getElementAsString("security")
+                        # Process each security in the response
+                        for security_data in msg.getElement("securityData").values():
+                            ticker = security_data.getElementAsString("security")
                             
                             # Find the bond's name from our configuration
                             bond_name = next((bond['Bond'] for bond in batch if bond['ID'] == ticker), None)
                             
                             try:
-                                field_data = security.getElement("fieldData")
+                                # Get the fieldData array
+                                field_data = security_data.getElement("fieldData")
+                                
+                                # Initialize yield and date as None
+                                yield_value = None
+                                price_date = None
+                                
+                                # If we have any data points
                                 if field_data.numValues() > 0:
-                                    # Get the first (and should be only) value
-                                    field_value = field_data.getValue(0)
-                                    yield_value = field_value.getElementAsFloat("YLD_CNV_LAST") if field_value.hasElement("YLD_CNV_LAST") else None
-                                    price_date = field_value.getElementAsDatetime("date") if field_value.hasElement("date") else None
-                                else:
-                                    yield_value = None
-                                    price_date = None
+                                    # Get the first (and should be only) data point
+                                    point = field_data.getValueAsElement(0)
+                                    
+                                    # Extract yield and date if available
+                                    if point.hasElement("YLD_CNV_LAST"):
+                                        yield_value = point.getElementAsFloat("YLD_CNV_LAST")
+                                    if point.hasElement("date"):
+                                        price_date = point.getElementAsDatetime("date")
                                 
                                 if yield_value is None:
                                     logger.warning(f"No yield data found for {ticker} on {date_str}")
                                 
                             except Exception as e:
+                                logger.warning(f"Could not get yield for {ticker}: {str(e)}")
                                 yield_value = None
                                 price_date = None
-                                logger.warning(f"Could not get yield for {ticker}: {str(e)}")
                             
                             # Store the results
                             results.append({
@@ -189,26 +194,35 @@ def get_bond_yields(session, bonds):
             
             if event.eventType() == blpapi.Event.RESPONSE:
                 for msg in event:
-                    security_data = msg.getElement("securityData")
-                    security = security_data.getValue(0)
+                    # Process JIBAR data
+                    security_data = msg.getElement("securityData").getValue(0)
                     
                     try:
-                        field_data = security.getElement("fieldData")
+                        # Get the fieldData array
+                        field_data = security_data.getElement("fieldData")
+                        
+                        # Initialize JIBAR value and date as None
+                        jibar_value = None
+                        price_date = None
+                        
+                        # If we have any data points
                         if field_data.numValues() > 0:
-                            field_value = field_data.getValue(0)
-                            jibar_value = field_value.getElementAsFloat("PX_LAST") if field_value.hasElement("PX_LAST") else None
-                            price_date = field_value.getElementAsDatetime("date") if field_value.hasElement("date") else None
-                        else:
-                            jibar_value = None
-                            price_date = None
+                            # Get the first (and should be only) data point
+                            point = field_data.getValueAsElement(0)
+                            
+                            # Extract JIBAR value and date if available
+                            if point.hasElement("PX_LAST"):
+                                jibar_value = point.getElementAsFloat("PX_LAST")
+                            if point.hasElement("date"):
+                                price_date = point.getElementAsDatetime("date")
                         
                         if jibar_value is None:
                             logger.warning(f"No JIBAR data found for date {date_str}")
                             
                     except Exception as e:
+                        logger.warning(f"Could not get JIBAR value: {str(e)}")
                         jibar_value = None
                         price_date = None
-                        logger.warning(f"Could not get JIBAR value: {str(e)}")
                     
                     # Add JIBAR to results
                     results.append({
