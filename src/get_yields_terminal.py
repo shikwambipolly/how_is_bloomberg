@@ -129,7 +129,7 @@ def get_bond_yields(session, bonds):
             while True:
                 event = session.nextEvent(500)  # Wait up to 500ms for response
                 
-                if event.eventType() == blpapi.Event.RESPONSE:
+                if event.eventType() in [blpapi.Event.PARTIAL_RESPONSE, blpapi.Event.RESPONSE]:
                     for msg in event:
                         if not msg.hasElement("securityData"):
                             logger.warning("Message does not contain 'securityData' element, skipping.")
@@ -188,7 +188,9 @@ def get_bond_yields(session, bonds):
                                 'Timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                             })
                     
-                    break  # Exit after processing the response
+                    # Only break on final RESPONSE, not on PARTIAL_RESPONSE
+                    if event.eventType() == blpapi.Event.RESPONSE:
+                        break
         
         # Finally, get JIBAR data separately
         jibar_request = refdata_service.createRequest("HistoricalDataRequest")
@@ -206,7 +208,7 @@ def get_bond_yields(session, bonds):
         while True:
             event = session.nextEvent(500)
             
-            if event.eventType() == blpapi.Event.RESPONSE:
+            if event.eventType() in [blpapi.Event.PARTIAL_RESPONSE, blpapi.Event.RESPONSE]:
                 for msg in event:
                     if not msg.hasElement("securityData"):
                         logger.warning("JIBAR message does not contain 'securityData' element, skipping.")
@@ -259,7 +261,9 @@ def get_bond_yields(session, bonds):
                             'Timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         })
                 
-                break
+                # Only break on final RESPONSE, not on PARTIAL_RESPONSE
+                if event.eventType() == blpapi.Event.RESPONSE:
+                    break
         
         # Log the total number of results collected
         logger.info(f"Total bonds collected: {len(results)} (including JIBAR)")
