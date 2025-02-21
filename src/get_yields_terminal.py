@@ -134,11 +134,19 @@ def get_bond_yields(session, bonds):
                         if not msg.hasElement("securityData"):
                             logger.warning("Message does not contain 'securityData' element, skipping.")
                             continue
-                        # Get the securityData element
-                        securityDataElem = msg.getElement("securityData")
-                        # Iterate over each security data element using numValues()
-                        for idx in range(securityDataElem.numValues()):
-                            security_data = securityDataElem.getValueAsElement(idx)
+                        secElem = msg.getElement("securityData")
+                        # Check if securityData is an array
+                        if secElem.isArray():
+                            count = secElem.numValues()
+                        else:
+                            count = 1
+                        
+                        for idx in range(count):
+                            if secElem.isArray():
+                                security_data = secElem.getValueAsElement(idx)
+                            else:
+                                security_data = secElem
+                            
                             ticker = security_data.getElementAsString("security")
                             
                             # Find the bond's name from our configuration
@@ -203,45 +211,53 @@ def get_bond_yields(session, bonds):
                     if not msg.hasElement("securityData"):
                         logger.warning("JIBAR message does not contain 'securityData' element, skipping.")
                         continue
-                    # Process JIBAR data
-                    securityDataElem = msg.getElement("securityData")
-                    security_data = securityDataElem.getValueAsElement(0)
+                    secElem = msg.getElement("securityData")
+                    if secElem.isArray():
+                        count = secElem.numValues()
+                    else:
+                        count = 1
                     
-                    try:
-                        # Get the fieldData array
-                        field_data = security_data.getElement("fieldData")
+                    for idx in range(count):
+                        if secElem.isArray():
+                            security_data = secElem.getValueAsElement(idx)
+                        else:
+                            security_data = secElem
                         
-                        # Initialize JIBAR value and date as None
-                        jibar_value = None
-                        price_date = None
-                        
-                        # If we have any data points
-                        if field_data.numValues() > 0:
-                            # Get the first (and should be only) data point
-                            point = field_data.getValueAsElement(0)
+                        try:
+                            # Get the fieldData array
+                            field_data = security_data.getElement("fieldData")
                             
-                            # Extract JIBAR value and date if available
-                            if point.hasElement("PX_LAST"):
-                                jibar_value = point.getElementAsFloat("PX_LAST")
-                            if point.hasElement("date"):
-                                price_date = point.getElementAsDatetime("date")
-                        
-                        if jibar_value is None:
-                            logger.warning(f"No JIBAR data found for date {date_str}")
+                            # Initialize JIBAR value and date as None
+                            jibar_value = None
+                            price_date = None
                             
-                    except Exception as e:
-                        logger.warning(f"Could not get JIBAR value: {str(e)}")
-                        jibar_value = None
-                        price_date = None
-                    
-                    # Add JIBAR to results
-                    results.append({
-                        'Bond': '3M JIBAR',
-                        'Bloomberg_ID': 'JIBA3M Index',
-                        'Yield': jibar_value,
-                        'Date': price_date.strftime("%Y-%m-%d") if price_date else None,
-                        'Timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    })
+                            # If we have any data points
+                            if field_data.numValues() > 0:
+                                # Get the first (and should be only) data point
+                                point = field_data.getValueAsElement(0)
+                                
+                                # Extract JIBAR value and date if available
+                                if point.hasElement("PX_LAST"):
+                                    jibar_value = point.getElementAsFloat("PX_LAST")
+                                if point.hasElement("date"):
+                                    price_date = point.getElementAsDatetime("date")
+                            
+                            if jibar_value is None:
+                                logger.warning(f"No JIBAR data found for date {date_str}")
+                                
+                        except Exception as e:
+                            logger.warning(f"Could not get JIBAR value: {str(e)}")
+                            jibar_value = None
+                            price_date = None
+                        
+                        # Add JIBAR to results
+                        results.append({
+                            'Bond': '3M JIBAR',
+                            'Bloomberg_ID': 'JIBA3M Index',
+                            'Yield': jibar_value,
+                            'Date': price_date.strftime("%Y-%m-%d") if price_date else None,
+                            'Timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        })
                 
                 break
         
