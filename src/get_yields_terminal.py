@@ -131,8 +131,11 @@ def get_bond_yields(session, bonds):
                 
                 if event.eventType() == blpapi.Event.RESPONSE:
                     for msg in event:
-                        # Process each security in the response
-                        for security_data in msg.getElement("securityData").values():
+                        # Get the securityData element
+                        securityDataElem = msg.getElement("securityData")
+                        # Iterate over each security data element using numValues()
+                        for idx in range(securityDataElem.numValues()):
+                            security_data = securityDataElem.getValueAsElement(idx)
                             ticker = security_data.getElementAsString("security")
                             
                             # Find the bond's name from our configuration
@@ -195,7 +198,8 @@ def get_bond_yields(session, bonds):
             if event.eventType() == blpapi.Event.RESPONSE:
                 for msg in event:
                     # Process JIBAR data
-                    security_data = msg.getElement("securityData").getValue(0)
+                    securityDataElem = msg.getElement("securityData")
+                    security_data = securityDataElem.getValueAsElement(0)
                     
                     try:
                         # Get the fieldData array
