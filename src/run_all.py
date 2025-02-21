@@ -155,12 +155,12 @@ def run_all_workflows():
             # Bloomberg summary
             if collector.workflow_status['bloomberg']:
                 body += "  ✓ Bloomberg Terminal\n"
-                body += f"     • Collected data for {len(collector.bloomberg_data)} bonds\n\n"
+                body += f"     • Collected data for {len(collector.bloomberg_data) if collector.bloomberg_data is not None else 0} bonds\n\n"
             
             # NSX summary
             if collector.workflow_status['nsx']:
                 body += "  ✓ NSX Daily Report\n"
-                body += f"     • Processed {len(collector.nsx_data)} rows\n\n"
+                body += f"     • Processed {len(collector.nsx_data) if collector.nsx_data is not None else 0} rows\n\n"
             
             # IJG summary
             if collector.workflow_status['ijg']:
@@ -171,7 +171,7 @@ def run_all_workflows():
             # Closing Yields summary
             if collector.workflow_status['closing_yields']:
                 body += "  ✓ Closing Yields Processing\n"
-                body += f"     • Processed {len(collector.closing_yields_data)} bonds\n\n"
+                body += f"     • Processed {len(collector.closing_yields_data) if collector.closing_yields_data is not None else 0} bonds\n\n"
         
         # Add failed workflows section if any
         if failed_workflows:

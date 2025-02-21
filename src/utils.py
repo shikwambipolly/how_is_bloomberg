@@ -38,8 +38,7 @@ def send_workflow_email(subject: str, body: str):
         message.subject = subject
         
         # Format the body with HTML to preserve line breaks
-        html_body = body.replace('\n', '<br>')
-        message.body = f"""
+        html_body = f"""
         <html>
         <body>
         <pre style="font-family: Consolas, 'Courier New', monospace; white-space: pre-wrap;">
@@ -49,10 +48,8 @@ def send_workflow_email(subject: str, body: str):
         </html>
         """
         
-        # Set content type to HTML
-        message._Message__message.body = message.body
-        message._Message__message.bodyPreview = body
-        message._Message__message.contentType = 'HTML'
+        # Set the message body with HTML formatting
+        message.body = html_body
         
         # Add recipients
         message.to.add([Config.ERROR_RECIPIENT_1, Config.ERROR_RECIPIENT_2, Config.ERROR_RECIPIENT_3])
@@ -64,6 +61,8 @@ def send_workflow_email(subject: str, body: str):
         
     except Exception as e:
         logging.error(f"Failed to send status email: {str(e)}")
+        # Re-raise the exception to ensure the calling code knows about the failure
+        raise
 
 def retry_with_notification(max_retries=3, delay_minutes=0.05):
     """Decorator for retrying functions with delay and email notification"""
