@@ -62,10 +62,10 @@ class ClosingYieldsProcessor:
         Process the input data to calculate closing yields.
         Creates a new DataFrame with:
         - Security (from NSX data)
-        - Benchmark (from NSX data)
-        - Benchmark Yield (from Bloomberg data, matched by benchmark name)
-        - Spread (from IJG spread data, matched by Government column)
-        - Closing Yield (calculated as benchmark yield + spread/100)
+        - Benchmark (from NSX data, only for GC bonds)
+        - Benchmark Yield (from Bloomberg data, only for GC bonds)
+        - Spread (from IJG spread data, only for GC bonds)
+        - Closing Yield (calculated for GC bonds, direct from IJG yields for GI bonds)
         
         Returns:
             DataFrame containing the processed closing yields
@@ -90,11 +90,10 @@ class ClosingYieldsProcessor:
             # Fill in Benchmark Yield column by matching benchmark names
             closing_yields_df['Benchmark Yield'] = closing_yields_df['Benchmark'].map(bloomberg_yields)
             
-            # Copy Spread column from IJG spread data
             # Create a mapping of government bonds to spreads from IJG data
             ijg_spreads = {}
             for _, row in self.ijg_spread_data.iterrows():
-                if 'Government' in row.index and 'Spread' in row.index:  # Ensure columns exist
+                if 'Government' in row.index and 'Spread' in row.index:
                     if pd.notna(row['Government']) and pd.notna(row['Spread']):
                         ijg_spreads[row['Government']] = row['Spread']
             
@@ -103,37 +102,47 @@ class ClosingYieldsProcessor:
             # Add Spread column by matching Security with Government column
             closing_yields_df['Spread'] = closing_yields_df['Security'].map(ijg_spreads)
             
-            # Calculate Closing Yield
-            closing_yields_df['Closing Yield'] = closing_yields_df.apply(
-                lambda row: row['Benchmark Yield'] + (row['Spread']/100) 
-                if pd.notna(row['Benchmark Yield']) and pd.notna(row['Spread']) 
-                else None, 
-                axis=1
-            )
+            # Create mapping for GI bonds from IJG yields data
+            gi_yields = {}
+            for _, row in self.ijg_yields_data.iterrows():
+                if pd.notna(row.iloc[0]) and pd.notna(row['PX_Last']):  # First column contains bond name
+                    gi_yields[row.iloc[0]] = row['PX_Last']
+            
+            logger.info(f"Created yield mapping for {len(gi_yields)} GI bonds from IJG yields data")
+            
+            # Calculate Closing Yield based on bond type
+            def calculate_closing_yield(row):
+                security = row['Security']
+                # Check if it's a GI bond
+                if security in gi_yields:
+                    return gi_yields[security]
+                # For GC bonds, calculate using benchmark yield and spread
+                elif pd.notna(row['Benchmark Yield']) and pd.notna(row['Spread']):
+                    return row['Benchmark Yield'] + (row['Spread']/100)
+                else:
+                    return None
+            
+            closing_yields_df['Closing Yield'] = closing_yields_df.apply(calculate_closing_yield, axis=1)
             
             # Log summary statistics
-            logger.info(f"Processed {len(closing_yields_df)} bonds")
-            logger.info(f"Found benchmark yields for {closing_yields_df['Benchmark Yield'].notna().sum()} bonds")
-            logger.info(f"Found spreads for {closing_yields_df['Spread'].notna().sum()} bonds")
-            logger.info(f"Calculated closing yields for {closing_yields_df['Closing Yield'].notna().sum()} bonds")
+            total_bonds = len(closing_yields_df)
+            gi_bonds = closing_yields_df['Security'].isin(gi_yields).sum()
+            gc_bonds = closing_yields_df['Benchmark'].notna().sum()
+            
+            logger.info(f"Processed {total_bonds} bonds in total:")
+            logger.info(f"  - {gi_bonds} GI bonds (direct yields)")
+            logger.info(f"  - {gc_bonds} GC bonds (calculated yields)")
+            logger.info(f"Found closing yields for {closing_yields_df['Closing Yield'].notna().sum()} bonds")
             
             # Log any missing data
-            missing_benchmark_yields = closing_yields_df[closing_yields_df['Benchmark Yield'].isna()]['Security'].tolist()
-            missing_spreads = closing_yields_df[closing_yields_df['Spread'].isna()]['Security'].tolist()
-            
-            if missing_benchmark_yields:
-                logger.warning(f"Missing benchmark yields for securities: {missing_benchmark_yields}")
-            if missing_spreads:
-                logger.warning(f"Missing spreads for securities: {missing_spreads}")
+            missing_yields = closing_yields_df[closing_yields_df['Closing Yield'].isna()]['Security'].tolist()
+            if missing_yields:
+                logger.warning(f"Missing closing yields for securities: {missing_yields}")
             
             # Log the mappings for debugging
-            logger.debug("Bloomberg yields mapping:")
-            for bond, yield_value in bloomberg_yields.items():
+            logger.debug("GI bond yields mapping:")
+            for bond, yield_value in gi_yields.items():
                 logger.debug(f"{bond}: {yield_value}")
-            
-            logger.debug("IJG spreads mapping:")
-            for gov, spread in ijg_spreads.items():
-                logger.debug(f"{gov}: {spread}")
             
             return closing_yields_df
             
