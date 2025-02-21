@@ -132,25 +132,22 @@ def get_bond_yields(session, bonds):
                 
                 if event.eventType() == blpapi.Event.RESPONSE:
                     for msg in event:
-                        security_data = msg.getElement("securityData")
-                        
                         # Process each security's data
-                        for j in range(security_data.numValues()):
-                            security = security_data.getValue(j)
-                            ticker = security.getElement("security").getValue()
+                        for security_data_table in msg.getElement("securityData").values():
+                            ticker = security_data_table.getElementAsString("security")
                             
                             # Find the bond's name from our configuration
                             bond_name = next((bond['Bond'] for bond in batch if bond['ID'] == ticker), None)
                             
                             try:
                                 # Get the field data array
-                                field_data = security.getElement("fieldData")
+                                field_data = security_data_table.getElement("fieldData")
                                 
                                 # Check if we have any data points
                                 if field_data.numValues() > 0:
                                     # Get the first (and should be only) data point
                                     data_point = field_data.getValue(0)
-                                    yield_value = data_point.getElement("YLD_CNV_LAST").getValue()
+                                    yield_value = data_point.getElementAsFloat("YLD_CNV_LAST")
                                 else:
                                     yield_value = None
                                     logger.warning(f"No historical data found for {ticker} on {date_str}")
@@ -188,18 +185,18 @@ def get_bond_yields(session, bonds):
             
             if event.eventType() == blpapi.Event.RESPONSE:
                 for msg in event:
-                    security_data = msg.getElement("securityData")
-                    security = security_data.getValue(0)
+                    # Process JIBAR data
+                    security_data_table = msg.getElement("securityData").getValue(0)
                     
                     try:
                         # Get the field data array
-                        field_data = security.getElement("fieldData")
+                        field_data = security_data_table.getElement("fieldData")
                         
                         # Check if we have any data points
                         if field_data.numValues() > 0:
                             # Get the first (and should be only) data point
                             data_point = field_data.getValue(0)
-                            jibar_value = data_point.getElement("PX_LAST").getValue()
+                            jibar_value = data_point.getElementAsFloat("PX_LAST")
                         else:
                             jibar_value = None
                             logger.warning(f"No historical data found for JIBAR on {date_str}")
