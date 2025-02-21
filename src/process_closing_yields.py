@@ -161,8 +161,8 @@ class ClosingYieldsProcessor:
             Path to the saved CSV file
         """
         try:
-            # Create a new directory for closing yields if it doesn't exist
-            output_file = Config.get_output_path('closing_yields') / f'closing_yields_{datetime.now().strftime("%Y%m%d")}.csv'
+            # Save to today's output directory
+            output_file = Config.get_output_path() / f'closing_yields_{datetime.now().strftime("%Y%m%d")}.csv'
             
             # Save to CSV
             df.to_csv(output_file, index=False)

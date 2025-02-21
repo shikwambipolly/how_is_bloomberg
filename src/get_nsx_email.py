@@ -229,7 +229,7 @@ class NSXEmailProcessor:
     def save_bonds_data(self, df):
         """Save the bonds data to CSV"""
         try:
-            output_file = Config.get_output_path('nsx') / f'nsx_bonds_{datetime.now().strftime("%Y%m%d")}.csv'
+            output_file = Config.get_output_path() / f'nsx_bonds_{datetime.now().strftime("%Y%m%d")}.csv'
             df.to_csv(output_file, index=False)
             logger.info(f"Successfully saved bonds data to {output_file}")
             return output_file

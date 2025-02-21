@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from datetime import datetime
 
 # Load environment variables from .env file
 env_path = Path(__file__).parent.parent / '.env'
@@ -48,19 +49,42 @@ class Config:
             )
 
     @classmethod
-    def get_output_path(cls, data_source):
-        """Get output directory path for specific data source"""
-        # Special handling for temp directory to ensure it's hidden
+    def get_date_folder(cls):
+        """Get today's date folder name"""
+        return datetime.now().strftime("%Y%m%d")
+
+    @classmethod
+    def get_output_path(cls, data_source=None):
+        """
+        Get output directory path for today's date.
+        All files will be stored in a single folder for each day.
+        
+        Args:
+            data_source: Optional source identifier for temp directory only
+        
+        Returns:
+            Path object for the appropriate output directory
+        """
+        # Special handling for temp directory
         if data_source == 'temp':
-            output_path = cls.OUTPUT_DIR / '.temp'
-        else:
-            output_path = cls.OUTPUT_DIR / data_source
-        output_path.mkdir(parents=True, exist_ok=True)
-        return output_path
+            temp_path = cls.OUTPUT_DIR / '.temp'
+            temp_path.mkdir(parents=True, exist_ok=True)
+            return temp_path
+        
+        # Create and return date-specific output directory
+        date_path = cls.OUTPUT_DIR / cls.get_date_folder()
+        date_path.mkdir(parents=True, exist_ok=True)
+        return date_path
 
     @classmethod
     def get_logs_path(cls):
-        """Get logs directory path"""
-        logs_path = cls.BASE_DIR / cls.LOGS_DIR
-        logs_path.mkdir(parents=True, exist_ok=True)
-        return logs_path 
+        """
+        Get logs directory path for today's date.
+        Creates a new folder for each day's logs.
+        
+        Returns:
+            Path object for today's logs directory
+        """
+        date_path = cls.LOGS_DIR / cls.get_date_folder()
+        date_path.mkdir(parents=True, exist_ok=True)
+        return date_path 

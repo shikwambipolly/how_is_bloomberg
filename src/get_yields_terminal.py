@@ -97,7 +97,7 @@ def get_bond_yields(session, bonds):
             batch = bonds[i:i+10]
             
             # Create request for this batch
-            request = refdata_service.createRequest("ReferenceDataRequest")
+            request = refdata_service.createRequest("HistoricalDataRequest")
             
             # Add each bond's ID to the request
             for bond in batch:
@@ -218,8 +218,8 @@ def run_terminal_workflow() -> WorkflowResult:
         # Convert results to a DataFrame
         df = pd.DataFrame(results)
         
-        # Save to CSV file with today's date
-        output_file = Config.get_output_path('bloomberg') / f'bond_yields_terminal_{datetime.now().strftime("%Y%m%d")}.csv'
+        # Save to CSV file with today's date in today's directory
+        output_file = Config.get_output_path() / f'bond_yields_terminal_{datetime.now().strftime("%Y%m%d")}.csv'
         df.to_csv(output_file, index=False)
         
         logger.info(f"Successfully saved yields to {output_file}")

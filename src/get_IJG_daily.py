@@ -138,7 +138,7 @@ class IJGDailyProcessor:
         try:
             # Create filename with format: ijg_<type>_YYYYMMDD.csv
             filename = f'ijg_{data_type}_{datetime.now().strftime("%Y%m%d")}.csv'
-            output_file = Config.get_output_path('ijg') / filename
+            output_file = Config.get_output_path() / filename
             
             # Save to CSV file
             df.to_csv(output_file, index=False)
