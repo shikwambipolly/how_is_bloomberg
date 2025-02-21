@@ -116,8 +116,10 @@ def get_bond_yields(session, bonds):
             
             # Specify which yield value we want and the date range
             request.append("fields", "YLD_CNV_LAST")  # Last Conventional Yield
-            request.append("startDate", date_str)
-            request.append("endDate", date_str)
+            
+            # Set the date range properly for historical request
+            request.set("startDate", date_str)
+            request.set("endDate", date_str)
             
             logger.info(f"Sending request for batch of {len(batch)} bonds (bonds {i+1} to {i+len(batch)})")
             
@@ -172,8 +174,8 @@ def get_bond_yields(session, bonds):
         jibar_request = refdata_service.createRequest("HistoricalDataRequest")
         jibar_request.append("securities", "JIBA3M Index")
         jibar_request.append("fields", "PX_LAST")
-        jibar_request.append("startDate", date_str)
-        jibar_request.append("endDate", date_str)
+        jibar_request.set("startDate", date_str)
+        jibar_request.set("endDate", date_str)
         
         logger.info("Sending request for JIBAR historical data")
         
