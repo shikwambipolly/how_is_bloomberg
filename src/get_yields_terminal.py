@@ -9,7 +9,7 @@ The data is saved to a CSV file with today's date in the filename.
 import json  # Library for reading JSON files
 import blpapi  # Bloomberg Terminal API
 import pandas as pd  # Library for data manipulation and analysis
-from datetime import datetime  # Library for working with dates and times
+from datetime import datetime, timedelta  # Library for working with dates and times
 import logging  # Library for creating log files
 from utils import retry_with_notification  # Custom retry mechanism
 from config import Config  # Project configuration settings
@@ -72,8 +72,8 @@ def init_bloomberg_terminal():
 @retry_with_notification()  # Retry this operation if it fails
 def get_bond_yields(session, bonds):
     """
-    Fetch yield values for a list of bonds from the Bloomberg Terminal.
-    For each bond, retrieves the Last Conventional Yield value.
+    Fetch historical yield values for a list of bonds from the Bloomberg Terminal.
+    Gets the Last Conventional Yield value from the previous business day.
     Also fetches JIBAR data separately using PX_LAST.
     Processes bonds in batches of maximum 10 securities per request.
     
@@ -86,11 +86,22 @@ def get_bond_yields(session, bonds):
             - Bond: Name of the bond
             - Bloomberg_ID: Bloomberg identifier
             - Yield: Last Conventional Yield value or PX_LAST for JIBAR
+            - Date: Date of the data
             - Timestamp: When the data was collected
     """ 
     try:
         results = []
         refdata_service = session.getService("//blp/refdata")
+        
+        # Get yesterday's date in Bloomberg format (YYYYMMDD)
+        today = datetime.now()
+        yesterday = today - timedelta(days=1)
+        # If yesterday was a weekend, go back to Friday
+        while yesterday.weekday() >= 5:  # 5 is Saturday, 6 is Sunday
+            yesterday = yesterday - timedelta(days=1)
+        date_str = yesterday.strftime("%Y%m%d")
+        
+        logger.info(f"Fetching yields for date: {date_str}")
         
         # Process regular bonds in batches of 10
         for i in range(0, len(bonds), 10):
@@ -103,8 +114,10 @@ def get_bond_yields(session, bonds):
             for bond in batch:
                 request.append("securities", bond['ID'])
             
-            # Specify which yield value we want
+            # Specify which yield value we want and the date range
             request.append("fields", "YLD_CNV_LAST")  # Last Conventional Yield
+            request.append("startDate", date_str)
+            request.append("endDate", date_str)
             
             logger.info(f"Sending request for batch of {len(batch)} bonds (bonds {i+1} to {i+len(batch)})")
             
@@ -123,14 +136,23 @@ def get_bond_yields(session, bonds):
                         for j in range(security_data.numValues()):
                             security = security_data.getValue(j)
                             ticker = security.getElement("security").getValue()
-                            field_data = security.getElement("fieldData")
                             
                             # Find the bond's name from our configuration
                             bond_name = next((bond['Bond'] for bond in batch if bond['ID'] == ticker), None)
                             
                             try:
-                                # Get yield value
-                                yield_value = field_data.getElement("YLD_CNV_LAST").getValue()
+                                # Get the field data array
+                                field_data = security.getElement("fieldData")
+                                
+                                # Check if we have any data points
+                                if field_data.numValues() > 0:
+                                    # Get the first (and should be only) data point
+                                    data_point = field_data.getValue(0)
+                                    yield_value = data_point.getElement("YLD_CNV_LAST").getValue()
+                                else:
+                                    yield_value = None
+                                    logger.warning(f"No historical data found for {ticker} on {date_str}")
+                                
                             except Exception as e:
                                 yield_value = None
                                 logger.warning(f"Could not get yield for {ticker}: {str(e)}")
@@ -140,17 +162,20 @@ def get_bond_yields(session, bonds):
                                 'Bond': bond_name,
                                 'Bloomberg_ID': ticker,
                                 'Yield': yield_value,
+                                'Date': yesterday.strftime("%Y-%m-%d"),
                                 'Timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                             })
                     
                     break  # Exit after processing the response
         
         # Finally, get JIBAR data separately
-        jibar_request = refdata_service.createRequest("ReferenceDataRequest")
+        jibar_request = refdata_service.createRequest("HistoricalDataRequest")
         jibar_request.append("securities", "JIBA3M Index")
         jibar_request.append("fields", "PX_LAST")
+        jibar_request.append("startDate", date_str)
+        jibar_request.append("endDate", date_str)
         
-        logger.info("Sending request for JIBAR data")
+        logger.info("Sending request for JIBAR historical data")
         
         # Send the JIBAR request
         session.sendRequest(jibar_request)
@@ -163,10 +188,20 @@ def get_bond_yields(session, bonds):
                 for msg in event:
                     security_data = msg.getElement("securityData")
                     security = security_data.getValue(0)
-                    field_data = security.getElement("fieldData")
                     
                     try:
-                        jibar_value = field_data.getElement("PX_LAST").getValue()
+                        # Get the field data array
+                        field_data = security.getElement("fieldData")
+                        
+                        # Check if we have any data points
+                        if field_data.numValues() > 0:
+                            # Get the first (and should be only) data point
+                            data_point = field_data.getValue(0)
+                            jibar_value = data_point.getElement("PX_LAST").getValue()
+                        else:
+                            jibar_value = None
+                            logger.warning(f"No historical data found for JIBAR on {date_str}")
+                            
                     except Exception as e:
                         jibar_value = None
                         logger.warning(f"Could not get JIBAR value: {str(e)}")
@@ -176,6 +211,7 @@ def get_bond_yields(session, bonds):
                         'Bond': '3M JIBAR',
                         'Bloomberg_ID': 'JIBA3M Index',
                         'Yield': jibar_value,
+                        'Date': yesterday.strftime("%Y-%m-%d"),
                         'Timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     })
                 
