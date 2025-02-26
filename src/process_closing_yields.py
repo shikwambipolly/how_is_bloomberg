@@ -79,6 +79,9 @@ class ClosingYieldsProcessor:
             today_date = datetime.now().strftime("%Y-%m-%d")
             logger.info(f"Today's date for comparison: {today_date}")
             
+            # Print NSX data columns to debug
+            logger.info(f"NSX data columns: {list(self.nsx_data.columns)}")
+            
             # Create new DataFrame with required columns from NSX data
             closing_yields_df = pd.DataFrame({
                 'Security': self.nsx_data['Security'],
@@ -88,6 +91,9 @@ class ClosingYieldsProcessor:
                 'NSX_Yield': self.nsx_data.get('Mark To (Yield)', pd.Series([None] * len(self.nsx_data))),  # NSX yield if available
                 'NSX_Spread': self.nsx_data.get('Spread', pd.Series([None] * len(self.nsx_data)))  # NSX spread if available
             })
+            
+            # Log NSX data sample
+            logger.info(f"Sample of NSX data with Spread column:\n{self.nsx_data[['Security', 'Spread']].head() if 'Spread' in self.nsx_data.columns else 'Spread column not found in NSX data'}")
             
             # Create a mapping of bond names to yields from Bloomberg data
             bloomberg_yields = {}
@@ -121,9 +127,12 @@ class ClosingYieldsProcessor:
                         
                         # Check if today's date
                         if has_gc_date_column and pd.notna(row.get('Date of last event')):
-                            row_date = pd.to_datetime(row['Date of last event']).strftime("%Y-%m-%d")
-                            if row_date == today_date:
-                                ijg_gc_today_spreads[row['Government']] = row['Spread']
+                            try:
+                                row_date = pd.to_datetime(row['Date of last event']).strftime("%Y-%m-%d")
+                                if row_date == today_date:
+                                    ijg_gc_today_spreads[row['Government']] = row['Spread']
+                            except Exception as e:
+                                logger.warning(f"Error parsing date for GC bond {row['Government']}: {str(e)}")
             
             logger.info(f"Created spread mapping for {len(ijg_spreads)} bonds from IJG GC data")
             logger.info(f"Found {len(ijg_gc_today_spreads)} GC bonds with today's date")
@@ -139,9 +148,12 @@ class ClosingYieldsProcessor:
                     
                     # Check if today's date - use "Date" column instead of "WAIT"
                     if has_gi_date_column and pd.notna(row.get('Date')):
-                        row_date = pd.to_datetime(row['Date']).strftime("%Y-%m-%d")
-                        if row_date == today_date:
-                            gi_today_yields[row.iloc[0]] = row['PX_Last']
+                        try:
+                            row_date = pd.to_datetime(row['Date']).strftime("%Y-%m-%d")
+                            if row_date == today_date:
+                                gi_today_yields[row.iloc[0]] = row['PX_Last']
+                        except Exception as e:
+                            logger.warning(f"Error parsing date for GI bond {row.iloc[0]}: {str(e)}")
             
             logger.info(f"Created yield mapping for {len(gi_yields)} GI bonds from IJG GI data")
             logger.info(f"Found {len(gi_today_yields)} GI bonds with today's date")
@@ -149,30 +161,38 @@ class ClosingYieldsProcessor:
             # Add a column to track data source
             closing_yields_df['Source'] = "Unknown"
             
+            # Create a dictionary to store sources for each security
+            sources = {}
+            
             # Calculate Closing Yield based on the new priority order
             def calculate_closing_yield(row):
                 security = row['Security']
-                has_active_trading = (row['NSX_Deals'] >= 1) and (row['NSX_Nominal'] >= 1000000)
+                has_active_trading = False
+                
+                # Check if NSX data is available for active trading check
+                if pd.notna(row['NSX_Deals']) and pd.notna(row['NSX_Nominal']):
+                    has_active_trading = (row['NSX_Deals'] >= 1) and (row['NSX_Nominal'] >= 1000000)
                 
                 # Check if it's a GI bond (no benchmark)
                 if pd.isna(row['Benchmark']):
                     # Priority 1: Check if data available with today's date
                     if security in gi_today_yields:
                         logger.info(f"Using IJG yield with today's date for GI bond {security}: {gi_today_yields[security]}")
-                        row['Source'] = "IJG GI Data (Today's Date)"
+                        sources[security] = "IJG GI Data (Today's Date)"
                         return gi_today_yields[security]
                     # Priority 2: Check active trading
                     elif has_active_trading and pd.notna(row['NSX_Yield']):
                         logger.info(f"Using NSX yield for actively traded GI bond {security}: {row['NSX_Yield']}")
-                        row['Source'] = "NSX (Active Trading)"
+                        sources[security] = "NSX (Active Trading)"
                         return row['NSX_Yield']
                     # Priority 3: Use regular IJG yield if available
                     elif security in gi_yields:
                         logger.info(f"Using IJG yield for GI bond {security}: {gi_yields[security]}")
-                        row['Source'] = "IJG GI Data"
+                        sources[security] = "IJG GI Data"
                         return gi_yields[security]
                     else:
                         logger.warning(f"No yield data found for GI bond {security}")
+                        sources[security] = "No Data Found"
                         return None
                 # For GC bonds (with benchmark)
                 else:
@@ -180,48 +200,80 @@ class ClosingYieldsProcessor:
                     benchmark_yield = row['Benchmark Yield']
                     if pd.isna(benchmark_yield):
                         logger.warning(f"Missing benchmark yield for {security}, cannot calculate closing yield")
+                        sources[security] = "Missing Benchmark Yield"
                         return None
                     
                     # Priority 1: Check if data available with today's date
                     if security in ijg_gc_today_spreads and pd.notna(ijg_gc_today_spreads[security]):
                         ijg_today_spread = ijg_gc_today_spreads[security]
                         logger.info(f"Using IJG spread with today's date for GC bond {security}: {ijg_today_spread} bps")
-                        row['Source'] = "IJG GC Data (Today's Date)"
+                        sources[security] = "IJG GC Data (Today's Date)"
                         return benchmark_yield + (ijg_today_spread/100)
                     # Priority 2: Check active trading
-                    elif has_active_trading and pd.notna(row['NSX_Spread']):
-                        nsx_spread = row['NSX_Spread']
-                        logger.info(f"Using spread from NSX for actively traded GC bond {security}: {nsx_spread} bps")
-                        row['Source'] = f"NSX Spread: {nsx_spread} bps"
-                        return benchmark_yield + (nsx_spread/100)
+                    elif has_active_trading:
+                        # Check if NSX spread is available
+                        if pd.notna(row['NSX_Spread']):
+                            nsx_spread = row['NSX_Spread']
+                            logger.info(f"Using spread from NSX for actively traded GC bond {security}: {nsx_spread} bps")
+                            sources[security] = f"NSX Spread: {nsx_spread} bps"
+                            return benchmark_yield + (nsx_spread/100)
+                        # Check if NSX yield is available to calculate spread
+                        elif pd.notna(row['NSX_Yield']):
+                            # Calculate spread from yield
+                            nsx_yield = row['NSX_Yield']
+                            calculated_spread = (nsx_yield - benchmark_yield) * 100
+                            logger.info(f"Calculated spread from NSX yield for actively traded GC bond {security}: {calculated_spread} bps")
+                            sources[security] = f"NSX Calculated Spread: {calculated_spread:.2f} bps"
+                            return nsx_yield
                     # Priority 3: Use regular IJG spread if available
                     elif security in ijg_spreads and pd.notna(ijg_spreads[security]):
                         ijg_spread = ijg_spreads[security]
                         logger.info(f"Using IJG spread for GC bond {security}: {ijg_spread} bps")
-                        row['Source'] = "IJG GC Data"
+                        sources[security] = "IJG GC Data"
                         return benchmark_yield + (ijg_spread/100)
                     else:
                         logger.warning(f"No spread found for GC bond {security}")
+                        sources[security] = "No Spread Found"
                         return None
             
+            # Calculate closing yields
             closing_yields_df['Closing Yield'] = closing_yields_df.apply(calculate_closing_yield, axis=1)
+            
+            # Update the Source column using the sources dictionary after calculation
+            for idx, row in closing_yields_df.iterrows():
+                security = row['Security']
+                if security in sources:
+                    closing_yields_df.at[idx, 'Source'] = sources[security]
+                    logger.debug(f"Setting source for {security} to: {sources[security]}")
+            
+            # Log the first few rows to check Source values
+            logger.info(f"Preview of closing yields with Source values:\n{closing_yields_df[['Security', 'Source']].head()}")
             
             # Calculate spread in basis points for GC bonds
             def calculate_spread_bps(row):
                 if pd.notna(row['Benchmark']) and pd.notna(row['Benchmark Yield']) and pd.notna(row['Closing Yield']):
                     # For GC bonds with active trading, get the spread directly
-                    if "NSX Spread:" in row['Source']:
+                    if "NSX Spread:" in str(row['Source']):
                         # Extract the numeric value from the source string (e.g., "NSX Spread: 123.45 bps")
                         try:
-                            return float(row['Source'].split(':')[1].strip().split(' ')[0])
-                        except (IndexError, ValueError):
+                            return float(str(row['Source']).split(':')[1].strip().split(' ')[0])
+                        except (IndexError, ValueError) as e:
+                            logger.warning(f"Error extracting spread from source for {row['Security']}: {str(e)}")
                             # Fallback to calculating spread if extraction fails
+                            return (row['Closing Yield'] - row['Benchmark Yield']) * 100
+                    elif "NSX Calculated Spread:" in str(row['Source']):
+                        try:
+                            return float(str(row['Source']).split(':')[1].strip().split(' ')[0])
+                        except (IndexError, ValueError) as e:
+                            logger.warning(f"Error extracting calculated spread from source for {row['Security']}: {str(e)}")
+                            # Fallback to calculating spread
                             return (row['Closing Yield'] - row['Benchmark Yield']) * 100
                     else:
                         # Calculate spread for other GC bonds
                         return (row['Closing Yield'] - row['Benchmark Yield']) * 100
                 return None
             
+            # Apply the spread calculation after Source has been updated
             closing_yields_df['Spread (bps)'] = closing_yields_df.apply(calculate_spread_bps, axis=1)
             
             # Log summary statistics
@@ -243,6 +295,10 @@ class ClosingYieldsProcessor:
             missing_yields = closing_yields_df[closing_yields_df['Closing Yield'].isna()]['Security'].tolist()
             if missing_yields:
                 logger.warning(f"Missing closing yields for securities: {missing_yields}")
+            
+            # Log distribution of source values
+            source_counts = closing_yields_df['Source'].value_counts()
+            logger.info(f"Distribution of Source values:\n{source_counts}")
             
             # Remove temporary columns used for calculation
             final_df = closing_yields_df.drop(columns=['NSX_Deals', 'NSX_Nominal', 'NSX_Yield', 'NSX_Spread'])
