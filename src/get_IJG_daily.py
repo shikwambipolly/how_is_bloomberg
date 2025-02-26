@@ -64,7 +64,7 @@ class IJGDailyProcessor:
         return bool(re.match(pattern, str(value).strip()))
     
     @retry_with_notification()  # Retry this operation if it fails
-    def extract_yields_data(self):
+    def extract_gi_data(self):
         """
         Extract data from the Yields sheet of the Excel file.
         Only keeps rows where the first column (A) contains a GI code.
@@ -74,14 +74,14 @@ class IJGDailyProcessor:
         """
         try:
             # Read the Yields sheet from the Excel file
-            df_yields = pd.read_excel(
+            df_gi = pd.read_excel(
                 self.excel_path,
                 sheet_name="Yields",
                 engine='openpyxl'  # Use openpyxl engine for .xlsx files
             )
             
             # Filter rows where the first column contains GI codes
-            gi_rows = df_yields[df_yields.iloc[:, 0].apply(self._is_gi_code)]
+            gi_rows = df_gi[df_gi.iloc[:, 0].apply(self._is_gi_code)]
             
             if gi_rows.empty:
                 raise ValueError("No GI codes found in Yields sheet")
@@ -90,37 +90,37 @@ class IJGDailyProcessor:
             return gi_rows
             
         except Exception as e:
-            logger.error(f"Error extracting Yields data: {str(e)}")
+            logger.error(f"Error extracting GI data: {str(e)}")
             raise
     
     @retry_with_notification()  # Retry this operation if it fails
-    def extract_spread_data(self):
+    def extract_gc_data(self):
         """
         Extract rows 2-19 from the Spread Calc sheet of the Excel file.
-        These rows contain specific spread calculation data.
+        These rows contain GC bond data for spread calculations.
         
         Returns:
             pandas.DataFrame: The extracted rows from the Spread Calc sheet
         """
         try:
             # Read the Spread Calc sheet from the Excel file
-            df_spread = pd.read_excel(
+            df_gc = pd.read_excel(
                 self.excel_path,
                 sheet_name="Spread calc",
                 engine='openpyxl'
             )
             
             # Extract rows 2-19 (index 1-18 since Python uses 0-based indexing)
-            spread_rows = df_spread.iloc[1:19].copy()
+            gc_rows = df_gc.iloc[1:19].copy()
             
-            if spread_rows.empty:
-                raise ValueError("No data found in rows 2-19 of Spread Calc sheet")
+            if gc_rows.empty:
+                raise ValueError("No GC data found in rows 2-19 of Spread Calc sheet")
             
-            logger.info(f"Successfully extracted {len(spread_rows)} rows from Spread Calc sheet")
-            return spread_rows
+            logger.info(f"Successfully extracted {len(gc_rows)} rows of GC data from Spread Calc sheet")
+            return gc_rows
             
         except Exception as e:
-            logger.error(f"Error extracting Spread Calc data: {str(e)}")
+            logger.error(f"Error extracting GC data: {str(e)}")
             raise
     
     def save_data(self, df: pd.DataFrame, data_type: str) -> str:
@@ -165,17 +165,17 @@ def run_ijg_workflow() -> WorkflowResult:
         processor = IJGDailyProcessor()
         
         # Extract both types of data
-        yields_data = processor.extract_yields_data()  # Get GI data
-        spread_data = processor.extract_spread_data()  # Get GC data
+        gi_data = processor.extract_gi_data()  # Get GI data
+        gc_data = processor.extract_gc_data()  # Get GC data
         
         # Save each dataset to its own CSV file
-        gi_file = processor.save_data(yields_data, 'GI')
-        gc_file = processor.save_data(spread_data, 'GC')
+        gi_file = processor.save_data(gi_data, 'GI')
+        gc_file = processor.save_data(gc_data, 'GC')
         
         # Return both datasets in a dictionary
         result_data = {
-            'yields': yields_data,
-            'spread': spread_data
+            'GI': gi_data,
+            'GC': gc_data
         }
         
         logger.info(f"Successfully completed IJG workflow")
@@ -191,6 +191,6 @@ if __name__ == "__main__":
     result = run_ijg_workflow()
     if result.success:
         print("\nIJG GI data preview:")
-        print(result.data['yields'].head())
+        print(result.data['GI'].head())
         print("\nIJG GC data preview:")
-        print(result.data['spread'].head())
+        print(result.data['GC'].head())

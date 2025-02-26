@@ -30,20 +30,20 @@ logger.addHandler(file_handler)
 
 class ClosingYieldsProcessor:
     def __init__(self, bloomberg_data: pd.DataFrame, nsx_data: pd.DataFrame, 
-                 ijg_yields_data: pd.DataFrame, ijg_spread_data: pd.DataFrame):
+                 ijg_gi_data: pd.DataFrame, ijg_gc_data: pd.DataFrame):
         """
         Initialize the processor with data from all sources.
         
         Args:
             bloomberg_data: DataFrame containing Bloomberg Terminal data
             nsx_data: DataFrame containing NSX Daily Report data
-            ijg_yields_data: DataFrame containing IJG Yields data
-            ijg_spread_data: DataFrame containing IJG Spread data
+            ijg_gi_data: DataFrame containing IJG GI bonds data
+            ijg_gc_data: DataFrame containing IJG GC bonds data
         """
         self.bloomberg_data = bloomberg_data
         self.nsx_data = nsx_data
-        self.ijg_yields_data = ijg_yields_data
-        self.ijg_spread_data = ijg_spread_data
+        self.ijg_gi_data = ijg_gi_data
+        self.ijg_gc_data = ijg_gc_data
         
         # Validate input data
         self._validate_input_data()
@@ -51,7 +51,7 @@ class ClosingYieldsProcessor:
     def _validate_input_data(self):
         """Validate that all required data is present and in the expected format"""
         if any(df is None for df in [self.bloomberg_data, self.nsx_data, 
-                                   self.ijg_yields_data, self.ijg_spread_data]):
+                                   self.ijg_gi_data, self.ijg_gc_data]):
             raise ValueError("All data sources must be provided")
         
         # Add more specific validation as needed for each DataFrame
@@ -64,13 +64,13 @@ class ClosingYieldsProcessor:
         Rules for closing yields:
         1. For GC bonds:
            - If NSX data shows Deals >= 1 AND Nominal >= 1,000,000, use spread from NSX "Spread" column
-           - Otherwise, use spread from IJG spread data
+           - Otherwise, use spread from IJG GC data
         2. For GI bonds:
            - If NSX data shows Deals >= 1 AND Nominal >= 1,000,000, use yield from NSX
-           - Otherwise, use yield from IJG yields data
+           - Otherwise, use yield from IJG GI data
         
         Returns:
-            DataFrame containing the processed closing yields
+            DataFrame containing the processed closing yields with spread and source information
         """
         try:
             logger.info("Starting closing yields calculation")
@@ -96,22 +96,25 @@ class ClosingYieldsProcessor:
             # Fill in Benchmark Yield column by matching benchmark names
             closing_yields_df['Benchmark Yield'] = closing_yields_df['Benchmark'].map(bloomberg_yields)
             
-            # Create a mapping of government bonds to spreads from IJG data
+            # Create a mapping of government bonds to spreads from IJG GC data
             ijg_spreads = {}
-            for _, row in self.ijg_spread_data.iterrows():
+            for _, row in self.ijg_gc_data.iterrows():
                 if 'Government' in row.index and 'Spread' in row.index:
                     if pd.notna(row['Government']) and pd.notna(row['Spread']):
                         ijg_spreads[row['Government']] = row['Spread']
             
-            logger.info(f"Created spread mapping for {len(ijg_spreads)} bonds from IJG data")
+            logger.info(f"Created spread mapping for {len(ijg_spreads)} bonds from IJG GC data")
             
-            # Create mapping for GI bonds from IJG yields data
+            # Create mapping for GI bonds from IJG GI data
             gi_yields = {}
-            for _, row in self.ijg_yields_data.iterrows():
+            for _, row in self.ijg_gi_data.iterrows():
                 if pd.notna(row.iloc[0]) and pd.notna(row['PX_Last']):  # First column contains bond name
                     gi_yields[row.iloc[0]] = row['PX_Last']
             
-            logger.info(f"Created yield mapping for {len(gi_yields)} GI bonds from IJG yields data")
+            logger.info(f"Created yield mapping for {len(gi_yields)} GI bonds from IJG GI data")
+            
+            # Add a column to track data source
+            closing_yields_df['Source'] = "Unknown"
             
             # Calculate Closing Yield based on bond type and trading activity
             def calculate_closing_yield(row):
@@ -123,9 +126,11 @@ class ClosingYieldsProcessor:
                     # Is it a GI bond with active trading?
                     if has_active_trading and pd.notna(row['NSX_Yield']):
                         logger.info(f"Using NSX yield for actively traded GI bond {security}: {row['NSX_Yield']}")
+                        row['Source'] = "NSX (Active Trading)"
                         return row['NSX_Yield']
                     # Otherwise, use IJG yield if available
                     elif security in gi_yields:
+                        row['Source'] = "IJG GI Data"
                         return gi_yields[security]
                     else:
                         return None
@@ -142,17 +147,37 @@ class ClosingYieldsProcessor:
                         # For active trading, use spread from NSX "Spread" column
                         nsx_spread = row['NSX_Spread']
                         logger.info(f"Using spread from NSX for actively traded GC bond {security}: {nsx_spread} bps")
+                        row['Source'] = f"NSX Spread: {nsx_spread} bps"
                         return benchmark_yield + (nsx_spread/100)
                     # Otherwise calculate using IJG spread if available
                     elif security in ijg_spreads and pd.notna(ijg_spreads[security]):
                         ijg_spread = ijg_spreads[security]
                         logger.info(f"Using IJG spread for GC bond {security}: {ijg_spread} bps")
+                        row['Source'] = "IJG GC Data"
                         return benchmark_yield + (ijg_spread/100)
                     else:
                         logger.warning(f"No spread found for {security}")
                         return None
             
             closing_yields_df['Closing Yield'] = closing_yields_df.apply(calculate_closing_yield, axis=1)
+            
+            # Calculate spread in basis points for GC bonds
+            def calculate_spread_bps(row):
+                if pd.notna(row['Benchmark']) and pd.notna(row['Benchmark Yield']) and pd.notna(row['Closing Yield']):
+                    # For GC bonds with active trading, get the spread directly
+                    if "NSX Spread:" in row['Source']:
+                        # Extract the numeric value from the source string (e.g., "NSX Spread: 123.45 bps")
+                        try:
+                            return float(row['Source'].split(':')[1].strip().split(' ')[0])
+                        except (IndexError, ValueError):
+                            # Fallback to calculating spread if extraction fails
+                            return (row['Closing Yield'] - row['Benchmark Yield']) * 100
+                    else:
+                        # Calculate spread for other GC bonds
+                        return (row['Closing Yield'] - row['Benchmark Yield']) * 100
+                return None
+            
+            closing_yields_df['Spread (bps)'] = closing_yields_df.apply(calculate_spread_bps, axis=1)
             
             # Log summary statistics
             total_bonds = len(closing_yields_df)
@@ -220,8 +245,8 @@ def run_closing_yields_workflow(data_collector) -> WorkflowResult:
         processor = ClosingYieldsProcessor(
             bloomberg_data=data_collector.bloomberg_data,
             nsx_data=data_collector.nsx_data,
-            ijg_yields_data=data_collector.ijg_yields_data,
-            ijg_spread_data=data_collector.ijg_spread_data
+            ijg_gi_data=data_collector.ijg_gi_data,
+            ijg_gc_data=data_collector.ijg_gc_data
         )
         
         # Process the data

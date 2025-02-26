@@ -66,8 +66,8 @@ def test_closing_yields():
         if not ijg_result.success:
             logger.error("Failed to fetch IJG data")
             return
-        logger.info(f"Successfully fetched IJG yields data with {len(ijg_result.data['yields'])} rows")
-        logger.info(f"Successfully fetched IJG spread data with {len(ijg_result.data['spread'])} rows")
+        logger.info(f"Successfully fetched IJG GI data with {len(ijg_result.data['GI'])} rows")
+        logger.info(f"Successfully fetched IJG GC data with {len(ijg_result.data['GC'])} rows")
         
         # Step 3: Load local NSX test file
         # Update this path to your test file location - adjusted for src folder
@@ -95,8 +95,8 @@ def test_closing_yields():
         processor = ClosingYieldsProcessor(
             bloomberg_data=bloomberg_result.data,
             nsx_data=nsx_data,
-            ijg_yields_data=ijg_result.data['yields'],
-            ijg_spread_data=ijg_result.data['spread']
+            ijg_gi_data=ijg_result.data['GI'],
+            ijg_gc_data=ijg_result.data['GC']
         )
         
         # Process the data
@@ -104,7 +104,7 @@ def test_closing_yields():
         
         # Create IJG spreads dictionary for adding to results
         ijg_spreads = {}
-        for _, row in ijg_result.data['spread'].iterrows():
+        for _, row in ijg_result.data['GC'].iterrows():
             if 'Government' in row.index and 'Spread' in row.index:
                 if pd.notna(row['Government']) and pd.notna(row['Spread']):
                     ijg_spreads[row['Government']] = row['Spread']
@@ -152,12 +152,12 @@ def test_closing_yields():
                 if is_active and nsx_spread is not None:
                     return f"NSX Spread: {nsx_spread} bps"
                 else:
-                    return "IJG Spread Data"
+                    return "IJG GC Data"
             else:  # GI bonds
                 if is_active:
                     return "NSX (Active Trading)"
                 else:
-                    return "IJG Yields Data"
+                    return "IJG GI Data"
         
         enhanced_results['Source'] = enhanced_results.apply(determine_source, axis=1)
         

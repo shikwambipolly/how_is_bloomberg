@@ -21,8 +21,8 @@ class DataCollector:
     def __init__(self):
         self.bloomberg_data: Optional[pd.DataFrame] = None
         self.nsx_data: Optional[pd.DataFrame] = None
-        self.ijg_yields_data: Optional[pd.DataFrame] = None
-        self.ijg_spread_data: Optional[pd.DataFrame] = None
+        self.ijg_gi_data: Optional[pd.DataFrame] = None
+        self.ijg_gc_data: Optional[pd.DataFrame] = None
         self.closing_yields_data: Optional[pd.DataFrame] = None
         self.workflow_status = {
             'bloomberg': False,
@@ -41,13 +41,13 @@ class DataCollector:
             elif source == 'ijg':
                 # Handle dictionary of dataframes for IJG
                 if isinstance(result.data, dict):
-                    self.ijg_yields_data = result.data.get('yields')
-                    self.ijg_spread_data = result.data.get('spread')
-                    if self.ijg_yields_data is not None and self.ijg_spread_data is not None:
-                        logging.info(f"Successfully stored IJG yields data with {len(self.ijg_yields_data)} rows")
-                        logging.info(f"Successfully stored IJG spread data with {len(self.ijg_spread_data)} rows")
+                    self.ijg_gi_data = result.data.get('GI')
+                    self.ijg_gc_data = result.data.get('GC')
+                    if self.ijg_gi_data is not None and self.ijg_gc_data is not None:
+                        logging.info(f"Successfully stored IJG GI data with {len(self.ijg_gi_data)} rows")
+                        logging.info(f"Successfully stored IJG GC data with {len(self.ijg_gc_data)} rows")
                     else:
-                        logging.error("Missing yields or spread data in IJG result")
+                        logging.error("Missing GI or GC data in IJG result")
                         self.workflow_status[source] = False
                         return
             elif source == 'closing_yields':
@@ -74,8 +74,8 @@ class DataCollector:
         return {
             'bloomberg': self.bloomberg_data,
             'nsx': self.nsx_data,
-            'ijg_yields': self.ijg_yields_data,
-            'ijg_spread': self.ijg_spread_data
+            'ijg_gi': self.ijg_gi_data,
+            'ijg_gc': self.ijg_gc_data
         }
 
 def ensure_output_directory():
@@ -168,8 +168,8 @@ def run_all_workflows():
             # IJG summary
             if collector.workflow_status['ijg']:
                 body += "  ✓ IJG Daily Report\n"
-                body += f"     • Yields data: {len(collector.ijg_yields_data) if collector.ijg_yields_data is not None else 0} rows\n"
-                body += f"     • Spread data: {len(collector.ijg_spread_data) if collector.ijg_spread_data is not None else 0} rows\n\n"
+                body += f"     • GI data: {len(collector.ijg_gi_data) if collector.ijg_gi_data is not None else 0} rows\n"
+                body += f"     • GC data: {len(collector.ijg_gc_data) if collector.ijg_gc_data is not None else 0} rows\n\n"
             
             # Closing Yields summary
             if collector.workflow_status['closing_yields']:
@@ -179,8 +179,21 @@ def run_all_workflows():
         # Add failed workflows section if any
         if failed_workflows:
             body += "Failed Collections:\n"
+            
+            # Create a dictionary to store workflow results and errors
+            workflow_results = {
+                'bloomberg': bloomberg_result,
+                'nsx': nsx_result,
+                'ijg': ijg_result,
+                'closing_yields': closing_yields_result if 'closing_yields' not in initial_failed else None
+            }
+            
             for workflow in failed_workflows:
                 body += f"  ✗ {workflow.title()}\n"
+                # Add error details if available
+                result = workflow_results.get(workflow)
+                if result and result.error:
+                    body += f"     • Error: {result.error}\n"
             body += "\n"
         
         # Add overall statistics
@@ -207,7 +220,10 @@ def run_all_workflows():
         error_body += "CRITICAL ERROR\n"
         error_body += "==============\n\n"
         error_body += "A critical error occurred in the master workflow:\n"
-        error_body += str(e)
+        error_body += f"{str(e)}\n\n"
+        error_body += "Stack trace (if available):\n"
+        import traceback
+        error_body += traceback.format_exc()
         
         send_workflow_email("✗ Bond Data Collections: Critical Error", error_body)
         return None
@@ -241,8 +257,8 @@ if __name__ == "__main__":
         # Example: Access individual DataFrames
         bloomberg_df = collector.bloomberg_data
         nsx_df = collector.nsx_data
-        ijg_yields_df = collector.ijg_yields_data
-        ijg_spread_df = collector.ijg_spread_data
+        ijg_gi_df = collector.ijg_gi_data
+        ijg_gc_df = collector.ijg_gc_data
         
         # Now you can work with the DataFrames as needed
         # For example:
@@ -254,12 +270,12 @@ if __name__ == "__main__":
             print("\nNSX Data Preview:")
             print(nsx_df.head())
         
-        if ijg_yields_df is not None:
-            print("\nIJG Yields Data Preview:")
-            print(ijg_yields_df.head())
+        if ijg_gi_df is not None:
+            print("\nIJG GI Data Preview:")
+            print(ijg_gi_df.head())
         
-        if ijg_spread_df is not None:
-            print("\nIJG Spread Data Preview:")
-            print(ijg_spread_df.head()) 
+        if ijg_gc_df is not None:
+            print("\nIJG GC Data Preview:")
+            print(ijg_gc_df.head()) 
         
         
