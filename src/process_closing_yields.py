@@ -63,7 +63,7 @@ class ClosingYieldsProcessor:
         
         Rules for closing yields:
         1. For GC bonds:
-           - If NSX data shows Deals >= 1 AND Nominal >= 1,000,000, use spread from NSX
+           - If NSX data shows Deals >= 1 AND Nominal >= 1,000,000, use spread from NSX "Spread" column
            - Otherwise, use spread from IJG spread data
         2. For GI bonds:
            - If NSX data shows Deals >= 1 AND Nominal >= 1,000,000, use yield from NSX
@@ -81,7 +81,8 @@ class ClosingYieldsProcessor:
                 'Benchmark': self.nsx_data['Benchmark'],
                 'NSX_Deals': self.nsx_data.get('Deals', pd.Series([0] * len(self.nsx_data))),
                 'NSX_Nominal': self.nsx_data.get('Nominal', pd.Series([0] * len(self.nsx_data))),
-                'NSX_Yield': self.nsx_data.get('Mark To (Yield)', pd.Series([None] * len(self.nsx_data)))  # NSX yield if available
+                'NSX_Yield': self.nsx_data.get('Mark To (Yield)', pd.Series([None] * len(self.nsx_data))),  # NSX yield if available
+                'NSX_Spread': self.nsx_data.get('Spread', pd.Series([None] * len(self.nsx_data)))  # NSX spread if available
             })
             
             # Create a mapping of bond names to yields from Bloomberg data
@@ -137,10 +138,10 @@ class ClosingYieldsProcessor:
                         return None
                     
                     # Is it a GC bond with active trading?
-                    if has_active_trading and pd.notna(row['NSX_Yield']):
-                        # For active trading, derive spread from NSX yield and benchmark yield
-                        nsx_spread = (row['NSX_Yield'] - benchmark_yield) * 100  # Convert to basis points
-                        logger.info(f"Using derived spread from NSX for actively traded GC bond {security}: {nsx_spread} bps")
+                    if has_active_trading and pd.notna(row['NSX_Spread']):
+                        # For active trading, use spread from NSX "Spread" column
+                        nsx_spread = row['NSX_Spread']
+                        logger.info(f"Using spread from NSX for actively traded GC bond {security}: {nsx_spread} bps")
                         return benchmark_yield + (nsx_spread/100)
                     # Otherwise calculate using IJG spread if available
                     elif security in ijg_spreads and pd.notna(ijg_spreads[security]):
@@ -172,7 +173,7 @@ class ClosingYieldsProcessor:
                 logger.warning(f"Missing closing yields for securities: {missing_yields}")
             
             # Remove temporary columns used for calculation
-            final_df = closing_yields_df.drop(columns=['NSX_Deals', 'NSX_Nominal', 'NSX_Yield'])
+            final_df = closing_yields_df.drop(columns=['NSX_Deals', 'NSX_Nominal', 'NSX_Yield', 'NSX_Spread'])
             
             return final_df
             

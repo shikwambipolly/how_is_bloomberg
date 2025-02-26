@@ -138,15 +138,19 @@ def test_closing_yields():
             
             # Check active trading criteria in original NSX data
             is_active = False
+            nsx_spread = None
             if security in nsx_data['Security'].values:
                 nsx_row = nsx_data[nsx_data['Security'] == security].iloc[0]
-                if ('Deals' in nsx_row and 'Nominal' in nsx_row and 
+                if ('Deals' in nsx_row.index and 'Nominal' in nsx_row.index and 
                     nsx_row['Deals'] >= 1 and nsx_row['Nominal'] >= 1000000):
                     is_active = True
+                    # Get the NSX spread if available
+                    if 'Spread' in nsx_row.index:
+                        nsx_spread = nsx_row['Spread']
             
             if has_benchmark:  # GC bonds
-                if is_active:
-                    return "NSX (Active Trading)"
+                if is_active and nsx_spread is not None:
+                    return f"NSX Spread: {nsx_spread} bps"
                 else:
                     return "IJG Spread Data"
             else:  # GI bonds
