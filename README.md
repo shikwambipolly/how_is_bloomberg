@@ -1,31 +1,26 @@
 # Bond Data Collection System
 
-A robust, automated system for collecting and processing bond data from multiple sources:
-- Bloomberg Terminal (real-time bond yields)
-- NSX Daily Report (via Office 365 email)
-- IJG Daily Report (Excel-based bond data)
+A robust, automated system for collecting and processing bond data from multiple sources to generate comprehensive analysis and reports.
 
 ## Project Overview
 
-This system automates the daily collection of bond data from three distinct sources, processes it, and stores it in a standardized format. Each data source has its own workflow with built-in error handling, retry mechanisms, and notification systems.
+This system automates the daily collection of financial market data from three distinct sources, processes it according to financial analysis rules, and generates standardized outputs. Each data source has its own workflow with built-in error handling, retry mechanisms, and notification systems.
 
 ### Data Sources
 
-1. **Bloomberg Terminal**
-   - Connects to local Bloomberg Terminal
-   - Fetches yield data (Bid/Ask) for configured bonds
-   - Uses Bloomberg's Python API (blpapi)
+1. **Market Data Terminal**
+   - Connects to financial data terminal
+   - Fetches yield data for configured bonds
+   - Uses provider's Python API
 
-2. **NSX Daily Report**
-   - Monitors Office 365 inbox for emails from info@nsx.com.na
-   - Downloads and processes "NSX Daily Report" Excel attachments
-   - Extracts bond trading data from specific sheets
+2. **National Data Source**
+   - Monitors Office 365 inbox for emails from the national exchange
+   - Downloads and processes daily report attachments
+   - Extracts relevant trading data
 
-3. **IJG Daily Report**
-   - Processes daily IJG Excel report
-   - Extracts and saves two separate datasets:
-     - GI data: Rows with GI codes from "Yields" sheet (saved as `ijg_GI_YYYYMMDD.csv`)
-     - GC data: Rows 2-19 from "Spread Calc" sheet (saved as `ijg_GC_YYYYMMDD.csv`)
+3. **Company Data**
+   - Processes daily company Excel reports
+   - Extracts and saves relevant datasets for further processing
 
 ### Key Features
 
@@ -35,13 +30,13 @@ This system automates the daily collection of bond data from three distinct sour
   - Automatic retry on failures
 
 - **Robust Error Handling**
-  - Three retry attempts with 15-minute intervals
+  - Three retry attempts with configurable intervals
   - Detailed error logging
   - Email notifications for persistent failures
 
 - **Data Processing**
   - Standardized data formats
-  - Source tracking
+  - Source tracking and prioritization
   - Data validation at each step
 
 - **Monitoring & Notifications**
@@ -53,7 +48,7 @@ This system automates the daily collection of bond data from three distinct sour
 
 ### Software Requirements
 - Python 3.7+
-- Bloomberg Terminal installed locally
+- Market data terminal installed locally
 - Microsoft Office 365 account with appropriate permissions
 - Git (for version control)
 
@@ -63,7 +58,7 @@ pip install -r requirements.txt
 ```
 
 ### Required Credentials
-1. **Bloomberg Terminal**
+1. **Market Data Terminal**
    - Local installation
    - Default connection settings
 
@@ -80,20 +75,17 @@ bond-data-collection/
 ├── README.md
 ├── requirements.txt
 ├── .env                        # Configuration file (not in version control)
-├── .env.example               # Example configuration template
+├── .env.example                # Example configuration template
 ├── src/
-│   ├── run_all.py            # Master workflow orchestrator
-│   ├── config.py             # Configuration management
-│   ├── utils.py              # Common utilities
-│   ├── get_yields_terminal.py # Bloomberg data collection
-│   ├── get_nsx_email.py      # NSX email processing
-│   ├── get_IJG_daily.py      # IJG data processing
-│   └── bonds.json            # Bond configuration
-├── output/                    # Data output directory
-│   ├── bloomberg/            # Bloomberg yield data
-│   ├── nsx/                  # NSX daily report data
-│   └── ijg/                  # IJG daily data
-└── logs/                     # Log files directory
+│   ├── run_all.py              # Master workflow orchestrator
+│   ├── config.py               # Configuration management
+│   ├── utils.py                # Common utilities
+│   ├── get_yields_terminal.py  # Market data collection
+│   ├── get_national_email.py   # National data source processing
+│   ├── get_company_daily.py    # Company data processing
+│   └── bonds.json              # Bond configuration
+├── output/                     # Data output directory
+└── logs/                       # Log files directory
 ```
 
 ## Configuration
@@ -106,7 +98,7 @@ cp .env.example .env
 
 2. Configure environment variables:
 ```bash
-# Bloomberg Terminal Configuration
+# Market Data Terminal Configuration
 BLOOMBERG_HOST=localhost
 BLOOMBERG_PORT=8194
 
@@ -119,7 +111,7 @@ ERROR_RECIPIENT_1=first.recipient@example.com
 ERROR_RECIPIENT_2=second.recipient@example.com
 
 # File Paths
-IJG_DAILY_PATH=/path/to/ijg/daily/report.xlsx
+COMPANY_DAILY_PATH=/path/to/daily/report.xlsx
 BONDS_JSON_PATH=src/bonds.json
 
 # Output Configuration
@@ -128,15 +120,7 @@ LOGS_DIR=logs
 ```
 
 ### Bond Configuration
-Configure target bonds in `bonds.json`:
-```json
-[
-    {
-        "ID": "CP507394@EXCH Corp",
-        "Bond": "R186"
-    }
-]
-```
+Configure target financial instruments in the bonds.json file.
 
 ## Usage
 
@@ -147,19 +131,14 @@ python src/run_all.py
 
 ### Running Individual Workflows
 ```bash
-python src/get_yields_terminal.py  # Bloomberg only
-python src/get_nsx_email.py       # NSX only
-python src/get_IJG_daily.py       # IJG only
+python src/get_yields_terminal.py  # Market data only
+python src/get_national_email.py   # National data source only
+python src/get_company_daily.py    # Company data only
 ```
 
 ### Output
 Each workflow generates:
-1. CSV data files in respective output directories:
-   - Bloomberg: `bond_yields_terminal_YYYYMMDD.csv`
-   - NSX: `nsx_bonds_YYYYMMDD.csv`
-   - IJG: Two separate files:
-     - `ijg_GI_YYYYMMDD.csv` (GI codes data)
-     - `ijg_GC_YYYYMMDD.csv` (Spread calculation data)
+1. CSV data files with standardized formats
 2. Detailed log files
 3. Error notifications (if needed)
 
@@ -189,8 +168,8 @@ Add to crontab:
 ### Error Handling
 The system includes comprehensive error handling:
 1. **Retry Logic**
-   - 3 attempts per operation
-   - 15-minute intervals between attempts
+   - Configurable retry attempts per operation
+   - Configurable intervals between attempts
    - Automatic notification on final failure
 
 2. **Data Validation**
@@ -240,17 +219,17 @@ The system includes comprehensive error handling:
 ## Troubleshooting
 
 ### Common Issues
-1. **Bloomberg Connection**
+1. **Data Terminal Connection**
    - Verify Terminal is running
    - Check connection settings
-   - Review Bloomberg logs
+   - Review logs
 
 2. **Email Processing**
    - Check O365 credentials
    - Verify email format
    - Review attachment names
 
-3. **IJG Data**
+3. **Company Data**
    - Verify file path
    - Check Excel format
    - Validate sheet names
@@ -269,4 +248,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## Disclaimer
 
-This project is not affiliated with Bloomberg L.P., NSX, or IJG. 
+This project is not affiliated with any financial data provider or exchange. Names of specific services are the property of their respective owners. 
