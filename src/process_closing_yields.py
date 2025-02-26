@@ -60,12 +60,14 @@ class ClosingYieldsProcessor:
     def process_data(self) -> pd.DataFrame:
         """
         Process the input data to calculate closing yields.
-        Creates a new DataFrame with:
-        - Security (from NSX data)
-        - Benchmark (from NSX data, only for GC bonds)
-        - Benchmark Yield (from Bloomberg data, only for GC bonds)
-        - Spread (from IJG spread data, only for GC bonds)
-        - Closing Yield (calculated for GC bonds, direct from IJG yields for GI bonds)
+        
+        Rules for closing yields:
+        1. For GC bonds:
+           - If NSX data shows Deals >= 1 AND Nominal >= 1,000,000, use spread from NSX
+           - Otherwise, use spread from IJG spread data
+        2. For GI bonds:
+           - If NSX data shows Deals >= 1 AND Nominal >= 1,000,000, use yield from NSX
+           - Otherwise, use yield from IJG yields data
         
         Returns:
             DataFrame containing the processed closing yields
@@ -73,10 +75,13 @@ class ClosingYieldsProcessor:
         try:
             logger.info("Starting closing yields calculation")
             
-            # Create new DataFrame with Security and Benchmark from NSX data
+            # Create new DataFrame with required columns from NSX data
             closing_yields_df = pd.DataFrame({
                 'Security': self.nsx_data['Security'],
-                'Benchmark': self.nsx_data['Benchmark']
+                'Benchmark': self.nsx_data['Benchmark'],
+                'NSX_Deals': self.nsx_data.get('Deals', pd.Series([0] * len(self.nsx_data))),
+                'NSX_Nominal': self.nsx_data.get('Nominal', pd.Series([0] * len(self.nsx_data))),
+                'NSX_Yield': self.nsx_data.get('Mark To (Yield)', pd.Series([None] * len(self.nsx_data)))  # NSX yield if available
             })
             
             # Create a mapping of bond names to yields from Bloomberg data
@@ -99,9 +104,6 @@ class ClosingYieldsProcessor:
             
             logger.info(f"Created spread mapping for {len(ijg_spreads)} bonds from IJG data")
             
-            # Add Spread column by matching Security with Government column
-            closing_yields_df['Spread'] = closing_yields_df['Security'].map(ijg_spreads)
-            
             # Create mapping for GI bonds from IJG yields data
             gi_yields = {}
             for _, row in self.ijg_yields_data.iterrows():
@@ -110,28 +112,58 @@ class ClosingYieldsProcessor:
             
             logger.info(f"Created yield mapping for {len(gi_yields)} GI bonds from IJG yields data")
             
-            # Calculate Closing Yield based on bond type
+            # Calculate Closing Yield based on bond type and trading activity
             def calculate_closing_yield(row):
                 security = row['Security']
-                # Check if it's a GI bond
-                if security in gi_yields:
-                    return gi_yields[security]
-                # For GC bonds, calculate using benchmark yield and spread
-                elif pd.notna(row['Benchmark Yield']) and pd.notna(row['Spread']):
-                    return row['Benchmark Yield'] + (row['Spread']/100)
+                has_active_trading = (row['NSX_Deals'] >= 1) and (row['NSX_Nominal'] >= 1000000)
+                
+                # Check if it's a GI bond (no benchmark)
+                if pd.isna(row['Benchmark']):
+                    # Is it a GI bond with active trading?
+                    if has_active_trading and pd.notna(row['NSX_Yield']):
+                        logger.info(f"Using NSX yield for actively traded GI bond {security}: {row['NSX_Yield']}")
+                        return row['NSX_Yield']
+                    # Otherwise, use IJG yield if available
+                    elif security in gi_yields:
+                        return gi_yields[security]
+                    else:
+                        return None
+                # For GC bonds (with benchmark)
                 else:
-                    return None
+                    # Get benchmark yield
+                    benchmark_yield = row['Benchmark Yield']
+                    if pd.isna(benchmark_yield):
+                        logger.warning(f"Missing benchmark yield for {security}, cannot calculate closing yield")
+                        return None
+                    
+                    # Is it a GC bond with active trading?
+                    if has_active_trading and pd.notna(row['NSX_Yield']):
+                        # For active trading, derive spread from NSX yield and benchmark yield
+                        nsx_spread = (row['NSX_Yield'] - benchmark_yield) * 100  # Convert to basis points
+                        logger.info(f"Using derived spread from NSX for actively traded GC bond {security}: {nsx_spread} bps")
+                        return benchmark_yield + (nsx_spread/100)
+                    # Otherwise calculate using IJG spread if available
+                    elif security in ijg_spreads and pd.notna(ijg_spreads[security]):
+                        ijg_spread = ijg_spreads[security]
+                        logger.info(f"Using IJG spread for GC bond {security}: {ijg_spread} bps")
+                        return benchmark_yield + (ijg_spread/100)
+                    else:
+                        logger.warning(f"No spread found for {security}")
+                        return None
             
             closing_yields_df['Closing Yield'] = closing_yields_df.apply(calculate_closing_yield, axis=1)
             
             # Log summary statistics
             total_bonds = len(closing_yields_df)
-            gi_bonds = closing_yields_df['Security'].isin(gi_yields).sum()
+            gi_bonds = closing_yields_df['Benchmark'].isna().sum()
             gc_bonds = closing_yields_df['Benchmark'].notna().sum()
+            active_trading_count = ((closing_yields_df['NSX_Deals'] >= 1) & 
+                                   (closing_yields_df['NSX_Nominal'] >= 1000000)).sum()
             
             logger.info(f"Processed {total_bonds} bonds in total:")
-            logger.info(f"  - {gi_bonds} GI bonds (direct yields)")
-            logger.info(f"  - {gc_bonds} GC bonds (calculated yields)")
+            logger.info(f"  - {gi_bonds} GI bonds")
+            logger.info(f"  - {gc_bonds} GC bonds")
+            logger.info(f"  - {active_trading_count} bonds with active trading (Deals >= 1 AND Nominal >= 1,000,000)")
             logger.info(f"Found closing yields for {closing_yields_df['Closing Yield'].notna().sum()} bonds")
             
             # Log any missing data
@@ -139,12 +171,10 @@ class ClosingYieldsProcessor:
             if missing_yields:
                 logger.warning(f"Missing closing yields for securities: {missing_yields}")
             
-            # Log the mappings for debugging
-            logger.debug("GI bond yields mapping:")
-            for bond, yield_value in gi_yields.items():
-                logger.debug(f"{bond}: {yield_value}")
+            # Remove temporary columns used for calculation
+            final_df = closing_yields_df.drop(columns=['NSX_Deals', 'NSX_Nominal', 'NSX_Yield'])
             
-            return closing_yields_df
+            return final_df
             
         except Exception as e:
             logger.error(f"Error processing closing yields: {str(e)}")
