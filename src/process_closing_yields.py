@@ -64,7 +64,7 @@ class ClosingYieldsProcessor:
         New priority order for yields/spreads:
         1. For all bonds (GC and GI), first check IJG daily file with today's date:
            - For GC bonds: Use Spread if "Date of last event" column = today
-           - For GI bonds: Use Yield if "WAIT" column = today
+           - For GI bonds: Use Yield if "Date" column = today
         2. If not available with today's date, check NSX data:
            - If Deals >= 1 AND Nominal >= 1,000,000, use NSX data
         3. If neither of the above, use IJG data regardless of date
@@ -104,9 +104,9 @@ class ClosingYieldsProcessor:
             has_gc_date_column = 'Date of last event' in self.ijg_gc_data.columns
             logger.info(f"IJG GC data has 'Date of last event' column: {has_gc_date_column}")
             
-            # Check if IJG GI data has "WAIT" column
-            has_gi_date_column = 'WAIT' in self.ijg_gi_data.columns
-            logger.info(f"IJG GI data has 'WAIT' column: {has_gi_date_column}")
+            # Check if IJG GI data has "Date" column (previously looking for "WAIT" column)
+            has_gi_date_column = 'Date' in self.ijg_gi_data.columns
+            logger.info(f"IJG GI data has 'Date' column: {has_gi_date_column}")
             
             # Create a mapping of government bonds to spreads from IJG GC data
             # Include date information if available
@@ -137,9 +137,9 @@ class ClosingYieldsProcessor:
                     # Store in regular mapping
                     gi_yields[row.iloc[0]] = row['PX_Last']
                     
-                    # Check if today's date
-                    if has_gi_date_column and pd.notna(row.get('WAIT')):
-                        row_date = pd.to_datetime(row['WAIT']).strftime("%Y-%m-%d")
+                    # Check if today's date - use "Date" column instead of "WAIT"
+                    if has_gi_date_column and pd.notna(row.get('Date')):
+                        row_date = pd.to_datetime(row['Date']).strftime("%Y-%m-%d")
                         if row_date == today_date:
                             gi_today_yields[row.iloc[0]] = row['PX_Last']
             
@@ -284,7 +284,7 @@ def run_closing_yields_workflow(data_collector) -> WorkflowResult:
     Priority order for determining closing yields:
     1. For all bonds (GC and GI), first check IJG daily file with today's date:
        - For GC bonds: Use Spread if "Date of last event" column = today
-       - For GI bonds: Use Yield if "WAIT" column = today
+       - For GI bonds: Use Yield if "Date" column = today
     2. If not available with today's date, check NSX data:
        - If Deals >= 1 AND Nominal >= 1,000,000, use NSX data
     3. If neither of the above, use IJG data regardless of date

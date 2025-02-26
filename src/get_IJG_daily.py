@@ -86,6 +86,15 @@ class IJGDailyProcessor:
             if gi_rows.empty:
                 raise ValueError("No GI codes found in Yields sheet")
             
+            # Rename the 7th column (index 6) to "Date" for consistency
+            if len(gi_rows.columns) > 6:
+                column_name = gi_rows.columns[6]
+                # Check if 7th column exists and rename it to "Date"
+                gi_rows.rename(columns={column_name: "Date"}, inplace=True)
+                logger.info(f"Renamed column '{column_name}' to 'Date' for GI data")
+            else:
+                logger.warning("GI data has fewer than 7 columns. Cannot rename date column.")
+            
             logger.info(f"Found {len(gi_rows)} rows with GI codes in Yields sheet")
             return gi_rows
             
