@@ -4,6 +4,7 @@ from get_yields_terminal import run_terminal_workflow
 from get_nsx_email import run_nsx_workflow
 from get_IJG_daily import run_ijg_workflow
 from process_closing_yields import run_closing_yields_workflow
+from post_processing import run_post_processing_workflow
 from utils import send_workflow_email
 from config import Config
 from typing import Optional
@@ -24,6 +25,7 @@ class DataCollector:
         self.ijg_gi_data: Optional[pd.DataFrame] = None
         self.ijg_gc_data: Optional[pd.DataFrame] = None
         self.closing_yields_data: Optional[pd.DataFrame] = None
+        self.post_processed_data: Optional[pd.DataFrame] = None
         self.workflow_status = {
             'bloomberg': False,
             'nsx': False,
@@ -53,12 +55,16 @@ class DataCollector:
             elif source == 'closing_yields':
                 self.closing_yields_data = result.data
                 logging.info(f"Successfully stored closing yields data with {len(self.closing_yields_data)} rows")
+            elif source == 'post_processing':
+                self.post_processed_data = result.data
+                logging.info(f"Successfully stored post-processed data with {len(self.post_processed_data)} rows")
             
             self.workflow_status[source] = True
             if source != 'ijg':  # Already logged IJG data above
                 logging.info(f"Successfully stored {source} data with {len(result.data)} rows")
         else:
-            self.workflow_status[source] = False
+            if source in self.workflow_status:  # Only update status for tracked workflows
+                self.workflow_status[source] = False
             logging.error(f"Failed to store {source} data: {result.error}")
     
     def get_failed_workflows(self):
@@ -75,7 +81,9 @@ class DataCollector:
             'bloomberg': self.bloomberg_data,
             'nsx': self.nsx_data,
             'ijg_gi': self.ijg_gi_data,
-            'ijg_gc': self.ijg_gc_data
+            'ijg_gc': self.ijg_gc_data,
+            'closing_yields': self.closing_yields_data,
+            'post_processed': self.post_processed_data
         }
 
 def ensure_output_directory():
@@ -127,6 +135,19 @@ def run_all_workflows():
             logging.info("Starting Closing Yields workflow...")
             closing_yields_result = run_closing_yields_workflow(collector)
             collector.store_data('closing_yields', closing_yields_result)
+            
+            # Run post-processing workflow only if closing yields workflow was successful
+            if closing_yields_result.success and collector.closing_yields_data is not None:
+                logging.info("Starting Post-Processing workflow...")
+                post_processing_result = run_post_processing_workflow(collector.closing_yields_data)
+                collector.store_data('post_processing', post_processing_result)
+                
+                if post_processing_result.success:
+                    logging.info("Post-Processing workflow completed successfully")
+                else:
+                    logging.error(f"Post-Processing workflow failed: {post_processing_result.error}")
+            else:
+                logging.error("Skipping Post-Processing workflow due to failed Closing Yields workflow")
         else:
             logging.error("Skipping Closing Yields workflow due to failed data collection workflows")
             collector.workflow_status['closing_yields'] = False
