@@ -174,6 +174,11 @@ class ClosingYieldsProcessor:
                 3. GI bonds with direct yield reporting from IJG
                 """
                 security = row['Security']
+                # Convert security to string to avoid float has no attribute 'startswith' error
+                if not isinstance(security, str):
+                    security = str(security)
+                    logger.warning(f"Security value was not a string, converted to: {security}")
+                
                 benchmark = row['Benchmark']
                 
                 # For any security with a direct closing yield from NSX active trading, use that yield
@@ -275,6 +280,9 @@ class ClosingYieldsProcessor:
             # Update the Source column using the sources dictionary after calculation
             for idx, row in closing_yields_df.iterrows():
                 security = row['Security']
+                # Ensure security is a string when used as dictionary key
+                if not isinstance(security, str):
+                    security = str(security)
                 if security in sources:
                     closing_yields_df.at[idx, 'Source'] = sources[security]
                     logger.debug(f"Setting source for {security} to: {sources[security]}")
