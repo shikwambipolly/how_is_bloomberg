@@ -11,6 +11,7 @@ from pathlib import Path
 from config import Config
 from workflow_result import WorkflowResult
 from typing import Dict
+from decimal import Decimal, ROUND_HALF_UP  # Add Decimal import for precise decimal handling
 
 # Set up logging
 logger = logging.getLogger('closing_yields_workflow')
@@ -166,25 +167,98 @@ class ClosingYieldsProcessor:
             
             # Calculate Closing Yield based on the new priority order
             def calculate_closing_yield(row):
+                """
+                Calculate the closing yield for a security based on predefined priorities:
+                1. NSX actively traded GC bonds with reported closing yield
+                2. GC bonds with benchmark and spread (from NSX if available, otherwise IJG)
+                3. GI bonds with direct yield reporting from IJG
+                """
                 security = row['Security']
-                has_active_trading = False
+                benchmark = row['Benchmark']
                 
-                # Check if NSX data is available for active trading check
-                if pd.notna(row['NSX_Deals']) and pd.notna(row['NSX_Nominal']):
-                    has_active_trading = (row['NSX_Deals'] >= 1) and (row['NSX_Nominal'] >= 1000000)
+                # For any security with a direct closing yield from NSX active trading, use that yield
+                if pd.notna(row['NSX_Yield']) and "Active Trading" in row.get('NSX_Source', ''):
+                    sources[security] = "NSX (Active Trading)"
+                    logger.info(f"Using NSX directly reported yield for {security}")
+                    return row['NSX_Yield']  # Already a float, keeping original precision
                 
-                # Check if it's a GI bond (no benchmark)
-                if pd.isna(row['Benchmark']):
+                # Different handling for GC vs GI securities
+                if security.startswith('GC'):
+                    # Priority 1: Try IJG GC data from today first (highest priority for GC bonds)
+                    if security in ijg_gc_today_spreads and pd.notna(ijg_gc_today_spreads[security]):
+                        sources[security] = "IJG GC Data (Today's Date)"
+                        logger.info(f"Using today's IJG GC yield for {security}: {ijg_gc_today_spreads[security]}")
+                        return ijg_gc_today_spreads[security]  # Preserve original precision
+                    
+                    # Get benchmark yield if available
+                    benchmark_yield = row['Benchmark Yield']
+                    
+                    if pd.notna(benchmark_yield):
+                        # Priority 2: Check if there's an active NSX spread
+                        if security in ijg_gc_today_spreads and pd.notna(ijg_gc_today_spreads[security]):
+                            try:
+                                nsx_spread = Decimal(str(ijg_gc_today_spreads[security]))
+                                benchmark_yield_decimal = Decimal(str(benchmark_yield))
+                                # Calculate yield with Decimal for precision
+                                calculated_yield = float(benchmark_yield_decimal + (nsx_spread/Decimal('100')))
+                                logger.info(f"Using NSX spread for GC bond {security} with benchmark {benchmark}: {nsx_spread} bps")
+                                sources[security] = f"NSX Spread: {nsx_spread} bps"
+                                return calculated_yield
+                            except (ValueError, TypeError) as e:
+                                logger.warning(f"Error calculating yield from NSX spread for {security}: {str(e)}")
+                        
+                        # Check if NSX yield is available to calculate spread
+                        elif pd.notna(row['NSX_Yield']):
+                            # Calculate spread from yield with Decimal
+                            try:
+                                nsx_yield = Decimal(str(row['NSX_Yield']))
+                                benchmark_yield_decimal = Decimal(str(benchmark_yield))
+                                calculated_spread = (nsx_yield - benchmark_yield_decimal) * Decimal('100')
+                                logger.info(f"Calculated spread from NSX yield for actively traded GC bond {security}: {calculated_spread} bps")
+                                sources[security] = f"NSX Calculated Spread: {calculated_spread} bps"
+                                return float(nsx_yield)
+                            except (ValueError, TypeError) as e:
+                                logger.warning(f"Error calculating spread from NSX yield for {security}: {str(e)}")
+                                # Fall back to floating point if Decimal fails
+                                nsx_yield = row['NSX_Yield']
+                                calculated_spread = (nsx_yield - benchmark_yield) * 100
+                                sources[security] = f"NSX Calculated Spread: {calculated_spread} bps"
+                                return nsx_yield
+                                
+                    # Priority 3: Use regular IJG spread if available
+                    elif security in ijg_spreads and pd.notna(ijg_spreads[security]):
+                        try:
+                            ijg_spread = Decimal(str(ijg_spreads[security]))
+                            benchmark_yield_decimal = Decimal(str(benchmark_yield))
+                            calculated_yield = float(benchmark_yield_decimal + (ijg_spread/Decimal('100')))
+                            logger.info(f"Using IJG spread for GC bond {security}: {ijg_spread} bps")
+                            sources[security] = "IJG GC Data"
+                            return calculated_yield
+                        except (ValueError, TypeError) as e:
+                            logger.warning(f"Error calculating yield from IJG spread for {security}: {str(e)}")
+                            # Fall back to floating point if Decimal fails
+                            ijg_spread = ijg_spreads[security]
+                            logger.info(f"Using IJG spread for GC bond {security}: {ijg_spread} bps")
+                            sources[security] = "IJG GC Data"
+                            return benchmark_yield + (ijg_spread/100)
+                    else:
+                        logger.warning(f"No spread found for GC bond {security}")
+                        sources[security] = "No Spread Found"
+                        return None
+                # For GI bonds (no benchmark)
+                else:
                     # Priority 1: Check if data available with today's date
                     if security in gi_today_yields:
                         logger.info(f"Using IJG yield with today's date for GI bond {security}: {gi_today_yields[security]}")
                         sources[security] = "IJG GI Data (Today's Date)"
                         return gi_today_yields[security]
                     # Priority 2: Check active trading
-                    elif has_active_trading and pd.notna(row['NSX_Yield']):
-                        logger.info(f"Using NSX yield for actively traded GI bond {security}: {row['NSX_Yield']}")
-                        sources[security] = "NSX (Active Trading)"
-                        return row['NSX_Yield']
+                    elif pd.notna(row['NSX_Deals']) and pd.notna(row['NSX_Nominal']):
+                        has_active_trading = (row['NSX_Deals'] >= 1) and (row['NSX_Nominal'] >= 1000000)
+                        if has_active_trading and pd.notna(row['NSX_Yield']):
+                            logger.info(f"Using NSX yield for actively traded GI bond {security}: {row['NSX_Yield']}")
+                            sources[security] = "NSX (Active Trading)"
+                            return row['NSX_Yield']
                     # Priority 3: Use regular IJG yield if available
                     elif security in gi_yields:
                         logger.info(f"Using IJG yield for GI bond {security}: {gi_yields[security]}")
@@ -193,47 +267,6 @@ class ClosingYieldsProcessor:
                     else:
                         logger.warning(f"No yield data found for GI bond {security}")
                         sources[security] = "No Data Found"
-                        return None
-                # For GC bonds (with benchmark)
-                else:
-                    # Get benchmark yield
-                    benchmark_yield = row['Benchmark Yield']
-                    if pd.isna(benchmark_yield):
-                        logger.warning(f"Missing benchmark yield for {security}, cannot calculate closing yield")
-                        sources[security] = "Missing Benchmark Yield"
-                        return None
-                    
-                    # Priority 1: Check if data available with today's date
-                    if security in ijg_gc_today_spreads and pd.notna(ijg_gc_today_spreads[security]):
-                        ijg_today_spread = ijg_gc_today_spreads[security]
-                        logger.info(f"Using IJG spread with today's date for GC bond {security}: {ijg_today_spread} bps")
-                        sources[security] = "IJG GC Data (Today's Date)"
-                        return benchmark_yield + (ijg_today_spread/100)
-                    # Priority 2: Check active trading
-                    elif has_active_trading:
-                        # Check if NSX spread is available
-                        if pd.notna(row['NSX_Spread']):
-                            nsx_spread = row['NSX_Spread']
-                            logger.info(f"Using spread from NSX for actively traded GC bond {security}: {nsx_spread} bps")
-                            sources[security] = f"NSX Spread: {nsx_spread} bps"
-                            return benchmark_yield + (nsx_spread/100)
-                        # Check if NSX yield is available to calculate spread
-                        elif pd.notna(row['NSX_Yield']):
-                            # Calculate spread from yield
-                            nsx_yield = row['NSX_Yield']
-                            calculated_spread = (nsx_yield - benchmark_yield) * 100
-                            logger.info(f"Calculated spread from NSX yield for actively traded GC bond {security}: {calculated_spread} bps")
-                            sources[security] = f"NSX Calculated Spread: {calculated_spread:.2f} bps"
-                            return nsx_yield
-                    # Priority 3: Use regular IJG spread if available
-                    elif security in ijg_spreads and pd.notna(ijg_spreads[security]):
-                        ijg_spread = ijg_spreads[security]
-                        logger.info(f"Using IJG spread for GC bond {security}: {ijg_spread} bps")
-                        sources[security] = "IJG GC Data"
-                        return benchmark_yield + (ijg_spread/100)
-                    else:
-                        logger.warning(f"No spread found for GC bond {security}")
-                        sources[security] = "No Spread Found"
                         return None
             
             # Calculate closing yields
@@ -256,14 +289,18 @@ class ClosingYieldsProcessor:
                     if "NSX Spread:" in str(row['Source']):
                         # Extract the numeric value from the source string (e.g., "NSX Spread: 123.45 bps")
                         try:
-                            return float(str(row['Source']).split(':')[1].strip().split(' ')[0])
+                            # Use Decimal for precise handling of the extracted value
+                            spread_str = str(row['Source']).split(':')[1].strip().split(' ')[0]
+                            return float(Decimal(spread_str))
                         except (IndexError, ValueError) as e:
                             logger.warning(f"Error extracting spread from source for {row['Security']}: {str(e)}")
                             # Fallback to calculating spread if extraction fails
                             return (row['Closing Yield'] - row['Benchmark Yield']) * 100
                     elif "NSX Calculated Spread:" in str(row['Source']):
                         try:
-                            return float(str(row['Source']).split(':')[1].strip().split(' ')[0])
+                            # Use Decimal for precise handling of the extracted value
+                            spread_str = str(row['Source']).split(':')[1].strip().split(' ')[0]
+                            return float(Decimal(spread_str))
                         except (IndexError, ValueError) as e:
                             logger.warning(f"Error extracting calculated spread from source for {row['Security']}: {str(e)}")
                             # Fallback to calculating spread

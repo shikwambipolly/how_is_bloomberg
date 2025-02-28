@@ -10,6 +10,7 @@ from pathlib import Path
 import os
 import sys
 import openpyxl  # For Excel file manipulation
+from decimal import Decimal  # Import Decimal for precise decimal handling
 
 # Get the correct paths for imports
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -115,15 +116,18 @@ class PostProcessor:
             
             logger.info(f"Found {len(securities)} securities in the Excel sheet")
             
-            # Create a map of securities to their closing yields from our DataFrame
-            security_yields = {}
+            # Map securities to closing yields
+            securities_to_yields = {}
             for _, row in self.closing_yields_data.iterrows():
-                security = row['Security']
-                closing_yield = row['Closing Yield']
-                if pd.notna(closing_yield):
-                    security_yields[security] = closing_yield
+                if pd.notna(row['Security']) and pd.notna(row['Closing Yield']):
+                    # Convert to Decimal for precise representation
+                    try:
+                        securities_to_yields[row['Security']] = Decimal(str(row['Closing Yield']))
+                    except:
+                        # Fallback to original value if conversion fails
+                        securities_to_yields[row['Security']] = row['Closing Yield']
             
-            logger.info(f"Found {len(security_yields)} securities with closing yields in our data")
+            logger.info(f"Mapped {len(securities_to_yields)} securities to their closing yields")
             
             # Find the last row with data
             last_row = self.find_last_data_row(input_sheet)
@@ -158,15 +162,22 @@ class PostProcessor:
             # Match securities and write closing yields
             securities_written = 0
             for security, col in securities.items():
-                if security in security_yields:
-                    # Get the cell we want to write to
-                    new_cell = input_sheet.cell(row=next_row, column=col)
-                    
+                if security in securities_to_yields:
                     # Get the template cell to copy formatting from 
                     template_cell = input_sheet.cell(row=template_row, column=col)
                     
-                    # Set the value
-                    new_cell.value = security_yields[security]
+                    # Get the cell we want to write to
+                    new_cell = input_sheet.cell(row=next_row, column=col)
+                    
+                    # Get the value as Decimal to preserve precision
+                    yield_value = securities_to_yields[security]
+                    
+                    # Set the value in the Excel cell
+                    # Preserve the exact value (don't convert to string and back)
+                    if isinstance(yield_value, Decimal):
+                        new_cell.value = float(yield_value)
+                    else:
+                        new_cell.value = yield_value
                     
                     # Copy number format and other properties from template cell
                     if template_cell.number_format:
@@ -182,7 +193,7 @@ class PostProcessor:
             logger.info(f"Added closing yields for {securities_written} securities")
             
             # Check for any securities in our data that were not found in the Excel sheet
-            missing_securities = [sec for sec in security_yields.keys() if sec not in securities]
+            missing_securities = [sec for sec in securities_to_yields.keys() if sec not in securities]
             if missing_securities:
                 logger.warning(f"These securities were in our data but not in Excel: {missing_securities}")
             

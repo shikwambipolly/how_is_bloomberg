@@ -14,6 +14,7 @@ import logging  # Library for creating log files
 from utils import retry_with_notification  # Custom retry mechanism
 from config import Config  # Project configuration settings
 from workflow_result import WorkflowResult  # Custom class for workflow results
+from decimal import Decimal  # Import Decimal for precise decimal handling
 
 # Set up logging
 logger = logging.getLogger('bloomberg_workflow')
@@ -162,7 +163,15 @@ def get_bond_yields(session, bonds):
                                     
                                     # Extract yield and date if available
                                     if point.hasElement("YLD_CNV_LAST"):
-                                        yield_value = point.getElementAsFloat("YLD_CNV_LAST")
+                                        # Get the raw value as string first to preserve precision
+                                        yield_str = point.getElementAsString("YLD_CNV_LAST")
+                                        try:
+                                            # Use Decimal to preserve exact decimal representation
+                                            yield_value = float(Decimal(yield_str))
+                                        except:
+                                            # Fallback to getElementAsFloat if parsing fails
+                                            yield_value = point.getElementAsFloat("YLD_CNV_LAST")
+                                        
                                     if point.hasElement("date"):
                                         price_date = point.getElementAsDatetime("date")
                                 
@@ -230,14 +239,23 @@ def get_bond_yields(session, bonds):
                             
                             # If we have any data points
                             if field_data.numValues() > 0:
-                                # Get the first (and should be only) data point
-                                point = field_data.getValueAsElement(0)
-                                
-                                # Extract JIBAR value and date if available
-                                if point.hasElement("PX_LAST"):
-                                    jibar_value = point.getElementAsFloat("PX_LAST")
-                                if point.hasElement("date"):
-                                    price_date = point.getElementAsDatetime("date")
+                                # Loop through the data points
+                                for i in range(field_data.numValues()):
+                                    point = field_data.getValueAsElement(i)
+                                    
+                                    # Extract PX_LAST value if available
+                                    if point.hasElement("PX_LAST"):
+                                        # Get the raw value as string first to preserve precision
+                                        jibar_str = point.getElementAsString("PX_LAST")
+                                        try:
+                                            # Use Decimal to preserve exact decimal representation
+                                            jibar_value = float(Decimal(jibar_str))
+                                        except:
+                                            # Fallback to getElementAsFloat if parsing fails
+                                            jibar_value = point.getElementAsFloat("PX_LAST")
+                                        
+                                    if point.hasElement("date"):
+                                        price_date = point.getElementAsDatetime("date")
                             
                             if jibar_value is None:
                                 logger.warning(f"No JIBAR data found for date {date_str}")
