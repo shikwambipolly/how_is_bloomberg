@@ -95,12 +95,7 @@ def get_bond_yields(session, bonds):
         
         # Get previous business day
         today = datetime.now()
-        prev_day = today - timedelta(days=1)
-        # If previous day is weekend, go back to Friday
-        while prev_day.weekday() > 4:  # 5 = Saturday, 6 = Sunday
-            prev_day = prev_day - timedelta(days=1)
-        
-        date_str = prev_day.strftime("%Y%m%d")
+        date_str = today.strftime("%Y%m%d")
         
         # Process regular bonds in batches of 10
         for i in range(0, len(bonds), 10):

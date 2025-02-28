@@ -64,7 +64,7 @@ def send_workflow_email(subject: str, body: str):
         # Re-raise the exception to ensure the calling code knows about the failure
         raise
 
-def retry_with_notification(max_retries=3, delay_minutes=0.05):
+def retry_with_notification(max_retries=3, delay_minutes=15):
     """Decorator for retrying functions with delay and email notification"""
     def decorator(func):
         @wraps(func)
