@@ -125,25 +125,56 @@ class PostProcessor:
             
             logger.info(f"Found {len(security_yields)} securities with closing yields in our data")
             
-            # Get today's date in the correct format (DD/MM/YYYY)
-            today_date = datetime.now().strftime("%d/%m/%Y")
-            logger.info(f"Using date format DD/MM/YYYY: {today_date}")
-            
             # Find the last row with data
             last_row = self.find_last_data_row(input_sheet)
+            
+            # Find the template row to copy formatting from
+            # Using last_row as our formatting template
+            template_row = last_row
+            logger.info(f"Using row {template_row} as formatting template")
             
             # Next row is immediately after the last data row
             next_row = last_row + 1
             logger.info(f"Adding new data at row {next_row}")
             
-            # Write today's date in the first column
-            input_sheet.cell(row=next_row, column=1).value = today_date
+            # Get today's date - Using today's date, but the formatting will be adjusted
+            today_date = datetime.now()
+            
+            # Write today's date in the first column and copy formatting from template
+            new_date_cell = input_sheet.cell(row=next_row, column=1)
+            template_date_cell = input_sheet.cell(row=template_row, column=1)
+            
+            # Set the value but keep the existing number format
+            new_date_cell.value = today_date
+            
+            # Copy the number format for date
+            if template_date_cell.number_format:
+                new_date_cell.number_format = template_date_cell.number_format
+                logger.info(f"Copied date number format: {template_date_cell.number_format}")
+            
+            # Copy other formatting properties from template cell
+            self._copy_cell_format(template_date_cell, new_date_cell)
             
             # Match securities and write closing yields
             securities_written = 0
             for security, col in securities.items():
                 if security in security_yields:
-                    input_sheet.cell(row=next_row, column=col).value = security_yields[security]
+                    # Get the cell we want to write to
+                    new_cell = input_sheet.cell(row=next_row, column=col)
+                    
+                    # Get the template cell to copy formatting from 
+                    template_cell = input_sheet.cell(row=template_row, column=col)
+                    
+                    # Set the value
+                    new_cell.value = security_yields[security]
+                    
+                    # Copy number format and other properties from template cell
+                    if template_cell.number_format:
+                        new_cell.number_format = template_cell.number_format
+                    
+                    # Copy other formatting properties
+                    self._copy_cell_format(template_cell, new_cell)
+                    
                     securities_written += 1
                 else:
                     logger.warning(f"Security {security} not found in closing yields data")
@@ -178,6 +209,41 @@ class PostProcessor:
         except Exception as e:
             logger.error(f"Error during post-processing: {str(e)}")
             raise
+    
+    def _copy_cell_format(self, source_cell, target_cell):
+        """
+        Copy formatting from source cell to target cell.
+        This includes font, border, alignment, fill, etc.
+        
+        Args:
+            source_cell: The cell to copy formatting from
+            target_cell: The cell to apply formatting to
+        """
+        try:
+            # Copy font
+            if source_cell.font:
+                target_cell.font = source_cell.font
+            
+            # Copy border
+            if source_cell.border:
+                target_cell.border = source_cell.border
+            
+            # Copy alignment
+            if source_cell.alignment:
+                target_cell.alignment = source_cell.alignment
+            
+            # Copy fill
+            if source_cell.fill:
+                target_cell.fill = source_cell.fill
+            
+            # Copy protection
+            if source_cell.protection:
+                target_cell.protection = source_cell.protection
+            
+            logger.debug(f"Successfully copied cell formatting from {source_cell.coordinate} to {target_cell.coordinate}")
+        except Exception as e:
+            logger.warning(f"Error copying cell format: {str(e)}")
+            # Don't raise the exception - it's not critical if formatting fails
     
     def save_results(self, df: pd.DataFrame) -> Path:
         """
