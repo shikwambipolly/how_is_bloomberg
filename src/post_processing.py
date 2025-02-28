@@ -53,6 +53,26 @@ class PostProcessor:
         logger.info("Initialized PostProcessor with closing yields data")
         self.excel_path = Path(Config.BASE_DIR) / "Bond Price Calculator.xlsx"
         
+    def find_last_data_row(self, sheet):
+        """
+        Find the last row with data in the Excel sheet.
+        
+        Args:
+            sheet: Excel worksheet to analyze
+            
+        Returns:
+            int: The last row number containing data
+        """
+        # Start from the top and find the last row with data in column A (date column)
+        last_row = 2  # Minimum is row 2 (header is row 1)
+        
+        for row in range(3, sheet.max_row + 1):
+            if sheet.cell(row=row, column=1).value is not None:
+                last_row = row
+        
+        logger.info(f"Found last data row at position {last_row}")
+        return last_row
+    
     def process_data(self) -> pd.DataFrame:
         """
         Update the Bond Price Calculator Excel file with the latest closing yields.
@@ -105,11 +125,15 @@ class PostProcessor:
             
             logger.info(f"Found {len(security_yields)} securities with closing yields in our data")
             
-            # Get today's date
-            today_date = datetime.now().strftime("%Y-%m-%d")
+            # Get today's date in the correct format (DD/MM/YYYY)
+            today_date = datetime.now().strftime("%d/%m/%Y")
+            logger.info(f"Using date format DD/MM/YYYY: {today_date}")
             
-            # Determine the next row to write data
-            next_row = input_sheet.max_row + 1
+            # Find the last row with data
+            last_row = self.find_last_data_row(input_sheet)
+            
+            # Next row is immediately after the last data row
+            next_row = last_row + 1
             logger.info(f"Adding new data at row {next_row}")
             
             # Write today's date in the first column
