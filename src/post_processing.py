@@ -11,6 +11,7 @@ import os
 import sys
 import openpyxl  # For Excel file manipulation
 from decimal import Decimal  # Import Decimal for precise decimal handling
+from openpyxl.styles import Font
 
 # Get the correct paths for imports
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -151,10 +152,9 @@ class PostProcessor:
             # Set the value but keep the existing number format
             new_date_cell.value = today_date
             
-            # Copy the number format for date
-            if template_date_cell.number_format:
-                new_date_cell.number_format = template_date_cell.number_format
-                logger.info(f"Copied date number format: {template_date_cell.number_format}")
+            # Set the date format explicitly to dd/mm/yyyy
+            new_date_cell.number_format = 'dd/mm/yyyy'
+            logger.info(f"Set date in cell A{next_row} to {today_date.strftime('%d/%m/%Y')} with dd/mm/yyyy format")
             
             # Copy other formatting properties from template cell
             self._copy_cell_format(template_date_cell, new_date_cell)
@@ -179,11 +179,11 @@ class PostProcessor:
                     else:
                         new_cell.value = yield_value
                     
-                    # Copy number format and other properties from template cell
-                    if template_cell.number_format:
-                        new_cell.number_format = template_cell.number_format
+                    # Set a consistent number format for yield values 
+                    # (typically yields should show 4 decimal places)
+                    new_cell.number_format = '0.0000'
                     
-                    # Copy other formatting properties
+                    # Apply other formatting properties (including font size 12)
                     self._copy_cell_format(template_cell, new_cell)
                     
                     securities_written += 1
@@ -235,29 +235,41 @@ class PostProcessor:
             target_cell: The cell to apply formatting to
         """
         try:
-            # Copy font
-            if source_cell.font:
-                target_cell.font = source_cell.font
+            # Set font size to 12 for all cells directly instead of copying
+            target_cell.font = Font(size=12)
             
-            # Copy border
-            if source_cell.border:
-                target_cell.border = source_cell.border
+            # For other properties, try to copy but don't throw errors if it fails
+            try:
+                # Copy border
+                if source_cell.border:
+                    target_cell.border = source_cell.border
+            except Exception as e:
+                logger.debug(f"Error copying border: {str(e)}")
             
-            # Copy alignment
-            if source_cell.alignment:
-                target_cell.alignment = source_cell.alignment
+            try:
+                # Copy alignment
+                if source_cell.alignment:
+                    target_cell.alignment = source_cell.alignment
+            except Exception as e:
+                logger.debug(f"Error copying alignment: {str(e)}")
             
-            # Copy fill
-            if source_cell.fill:
-                target_cell.fill = source_cell.fill
+            try:
+                # Copy fill
+                if source_cell.fill:
+                    target_cell.fill = source_cell.fill
+            except Exception as e:
+                logger.debug(f"Error copying fill: {str(e)}")
             
-            # Copy protection
-            if source_cell.protection:
-                target_cell.protection = source_cell.protection
+            try:
+                # Copy protection
+                if source_cell.protection:
+                    target_cell.protection = source_cell.protection
+            except Exception as e:
+                logger.debug(f"Error copying protection: {str(e)}")
             
-            logger.debug(f"Successfully copied cell formatting from {source_cell.coordinate} to {target_cell.coordinate}")
+            logger.debug(f"Applied formatting to cell {target_cell.coordinate} with font size 12")
         except Exception as e:
-            logger.warning(f"Error copying cell format: {str(e)}")
+            logger.warning(f"Error applying cell format: {str(e)}")
             # Don't raise the exception - it's not critical if formatting fails
     
     def extend_gc_sheet_formulas(self, workbook):
@@ -316,11 +328,53 @@ class PostProcessor:
                     target_cell = gc_sheet.cell(row=target_row, column=col)
                     
                     # For dates, increment by one day
-                    if isinstance(source_cell.value, datetime):
+                    if col == 1:  # This is column A - special handling for dates
+                        # Get the date from the last row
+                        last_date = source_cell.value
+                        if isinstance(last_date, datetime):
+                            # Increment by one day
+                            new_date = last_date + pd.Timedelta(days=1)
+                            target_cell.value = new_date
+                            
+                            # Apply dd/mm/yyyy format specifically
+                            target_cell.number_format = 'dd/mm/yyyy'
+                            logger.info(f"Set date in cell A{target_row} to {new_date.strftime('%d/%m/%Y')}")
+                        else:
+                            # If it's not already a date, try to parse it
+                            try:
+                                if isinstance(last_date, str):
+                                    # Try to parse the string date
+                                    parsed_date = pd.to_datetime(last_date)
+                                    new_date = parsed_date + pd.Timedelta(days=1)
+                                    target_cell.value = new_date
+                                    target_cell.number_format = 'dd/mm/yyyy'
+                                    logger.info(f"Set date in cell A{target_row} to {new_date.strftime('%d/%m/%Y')}")
+                                else:
+                                    # If we can't determine the date, use today's date
+                                    today = datetime.now()
+                                    target_cell.value = today
+                                    target_cell.number_format = 'dd/mm/yyyy'
+                                    logger.warning(f"Could not determine date pattern. Set cell A{target_row} to today's date: {today.strftime('%d/%m/%Y')}")
+                            except Exception as e:
+                                # If all else fails, use today's date
+                                today = datetime.now()
+                                target_cell.value = today
+                                target_cell.number_format = 'dd/mm/yyyy'
+                                logger.warning(f"Error parsing date: {str(e)}. Set cell A{target_row} to today's date: {today.strftime('%d/%m/%Y')}")
+                    elif isinstance(source_cell.value, datetime):
+                        # For other date columns, still increment by one day
                         target_cell.value = source_cell.value + pd.Timedelta(days=1)
+                        # Copy the original number format if available
+                        if source_cell.number_format:
+                            target_cell.number_format = source_cell.number_format
                     else:
+                        # For non-date cells, just copy the value
                         target_cell.value = source_cell.value
-                        
+                        # Copy the original number format if available
+                        if source_cell.number_format:
+                            target_cell.number_format = source_cell.number_format
+                    
+                    # Apply other formatting (with font size 12)
                     self._copy_cell_format(source_cell, target_cell)
             
             # Now extend formulas using Excel's pattern recognition
