@@ -197,6 +197,10 @@ class PostProcessor:
             if missing_securities:
                 logger.warning(f"These securities were in our data but not in Excel: {missing_securities}")
             
+            # Apply formula extension to the GC sheet
+            logger.info("Now extending formulas in the GC sheet")
+            self.extend_gc_sheet_formulas(workbook)
+            
             # Save the updated workbook
             try:
                 workbook.save(self.excel_path)
@@ -255,6 +259,201 @@ class PostProcessor:
         except Exception as e:
             logger.warning(f"Error copying cell format: {str(e)}")
             # Don't raise the exception - it's not critical if formatting fails
+    
+    def extend_gc_sheet_formulas(self, workbook):
+        """
+        Find the GC sheet, identify the last two rows with data, and use Excel's
+        autofill functionality to extend the formulas down one more row.
+        
+        Args:
+            workbook: The openpyxl workbook object
+        """
+        try:
+            # Check if GC sheet exists
+            if "GC" not in workbook.sheetnames:
+                logger.warning("GC sheet not found in workbook")
+                return
+                
+            gc_sheet = workbook["GC"]
+            logger.info("Successfully opened 'GC' sheet")
+            
+            # Find the last row with data (starts from A column)
+            last_row = 2  # Default to row 2 if no data found
+            for row in range(2, gc_sheet.max_row + 1):
+                if gc_sheet.cell(row=row, column=1).value is not None:
+                    last_row = row
+            
+            if last_row < 3:  # Need at least 2 rows to extend formulas
+                logger.warning("Not enough data rows in GC sheet to extend formulas")
+                return
+                
+            # The two source rows for the formula patterns
+            source_row1 = last_row - 1
+            source_row2 = last_row
+            
+            # Target row where we want to extend the formulas
+            target_row = last_row + 1
+            
+            logger.info(f"Extending formulas from rows {source_row1} and {source_row2} to row {target_row}")
+            
+            # First, we'll find all columns with formulas in the source rows
+            formula_columns = []
+            for col in range(1, gc_sheet.max_column + 1):
+                cell1 = gc_sheet.cell(row=source_row1, column=col)
+                cell2 = gc_sheet.cell(row=source_row2, column=col)
+                
+                # Check if either of the source cells has a formula
+                if isinstance(cell1.value, str) and cell1.value.startswith('='):
+                    formula_columns.append(col)
+                elif isinstance(cell2.value, str) and cell2.value.startswith('='):
+                    formula_columns.append(col)
+            
+            # Now copy non-formula values directly (like dates)
+            for col in range(1, gc_sheet.max_column + 1):
+                if col not in formula_columns:
+                    # Copy the value and format from the last row
+                    source_cell = gc_sheet.cell(row=source_row2, column=col)
+                    target_cell = gc_sheet.cell(row=target_row, column=col)
+                    
+                    # For dates, increment by one day
+                    if isinstance(source_cell.value, datetime):
+                        target_cell.value = source_cell.value + pd.Timedelta(days=1)
+                    else:
+                        target_cell.value = source_cell.value
+                        
+                    self._copy_cell_format(source_cell, target_cell)
+            
+            # Now extend formulas using Excel's pattern recognition
+            for col in formula_columns:
+                cell1 = gc_sheet.cell(row=source_row1, column=col)
+                cell2 = gc_sheet.cell(row=source_row2, column=col)
+                target_cell = gc_sheet.cell(row=target_row, column=col)
+                
+                # Check if we can detect a pattern in the formulas
+                if isinstance(cell1.value, str) and isinstance(cell2.value, str):
+                    # Both cells have formulas, try to detect the pattern and extend it
+                    formula1 = cell1.value
+                    formula2 = cell2.value
+                    
+                    # Simple pattern: look for row references that changed
+                    new_formula = self._extend_formula_pattern(formula1, formula2, target_row)
+                    if new_formula:
+                        target_cell.value = new_formula
+                        # Copy formatting from the last row
+                        self._copy_cell_format(cell2, target_cell)
+                    else:
+                        # If pattern detection fails, just copy the last formula
+                        target_cell.value = formula2
+                        self._copy_cell_format(cell2, target_cell)
+                elif isinstance(cell2.value, str) and cell2.value.startswith('='):
+                    # Only the last row has a formula, just copy and adjust it
+                    formula = cell2.value
+                    # Try to adjust row references
+                    row_diff = target_row - source_row2
+                    new_formula = self._adjust_row_references(formula, row_diff)
+                    target_cell.value = new_formula
+                    self._copy_cell_format(cell2, target_cell)
+            
+            logger.info(f"Successfully extended formulas to row {target_row} in GC sheet")
+            
+        except Exception as e:
+            logger.error(f"Error extending GC sheet formulas: {str(e)}")
+            # Don't raise the exception - we don't want to fail the entire workflow
+    
+    def _extend_formula_pattern(self, formula1, formula2, target_row):
+        """
+        Try to detect a pattern between two formulas and extend it to create a new formula.
+        This is a simplified implementation that handles common patterns in Excel formulas.
+        
+        Args:
+            formula1: Formula from the first source row
+            formula2: Formula from the second source row
+            target_row: Target row number for the new formula
+            
+        Returns:
+            str: The extended formula for the target row, or None if pattern can't be detected
+        """
+        try:
+            # First, check if formulas are identical
+            if formula1 == formula2:
+                return formula2  # No pattern to extend
+            
+            # Look for simple row reference increments
+            # In Excel formulas, rows are often referenced as A1, B1, etc.
+            # When moving down, these change to A2, B2, etc.
+            
+            # This is a simplistic approach - it assumes row references increment by 1
+            # and that the pattern continues
+            row_diff = target_row - (target_row - 1)  # Always 1 in our case
+            
+            # Try to detect the difference between formula1 and formula2
+            # and apply the same difference to get formula3
+            
+            # Simple case: formulas with cell references like A1, B2, etc.
+            # We'll look for cell references that changed by exactly one row
+            import re
+            
+            # Find all cell references in both formulas
+            # Example pattern: A1, B12, AA123, etc.
+            cell_ref_pattern = r'([A-Z]+)(\d+)'
+            refs1 = re.findall(cell_ref_pattern, formula1)
+            refs2 = re.findall(cell_ref_pattern, formula2)
+            
+            if len(refs1) == len(refs2):
+                # Map old references to new ones
+                replacements = {}
+                
+                for (col1, row1), (col2, row2) in zip(refs1, refs2):
+                    if col1 == col2 and int(row2) - int(row1) == row_diff:
+                        # This reference follows the pattern
+                        new_row = int(row2) + row_diff
+                        replacements[f"{col2}{row2}"] = f"{col2}{new_row}"
+                
+                # Apply replacements to formula2
+                new_formula = formula2
+                for old_ref, new_ref in replacements.items():
+                    new_formula = new_formula.replace(old_ref, new_ref)
+                
+                return new_formula
+            
+            # If we couldn't detect a pattern, return None
+            return None
+            
+        except Exception as e:
+            logger.warning(f"Error extending formula pattern: {str(e)}")
+            return None
+    
+    def _adjust_row_references(self, formula, row_diff):
+        """
+        Adjust row references in a formula by the specified difference.
+        
+        Args:
+            formula: The formula to adjust
+            row_diff: The number of rows to add to each reference
+            
+        Returns:
+            str: The adjusted formula
+        """
+        try:
+            import re
+            
+            # Find all cell references in the formula
+            cell_ref_pattern = r'([A-Z]+)(\d+)'
+            refs = re.findall(cell_ref_pattern, formula)
+            
+            # Create new formula with adjusted references
+            new_formula = formula
+            for col, row in refs:
+                old_ref = f"{col}{row}"
+                new_row = int(row) + row_diff
+                new_ref = f"{col}{new_row}"
+                new_formula = new_formula.replace(old_ref, new_ref)
+            
+            return new_formula
+            
+        except Exception as e:
+            logger.warning(f"Error adjusting row references: {str(e)}")
+            return formula  # Return original formula if adjustment fails
     
     def save_results(self, df: pd.DataFrame) -> Path:
         """

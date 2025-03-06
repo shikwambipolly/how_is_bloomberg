@@ -73,7 +73,7 @@ class NSXEmailProcessor:
             
             # Get current time in UTC
             now = datetime.now(pytz.UTC)
-            time_threshold = now - timedelta(hours=24)
+            time_threshold = now - timedelta(hours=3)
             
             # Query for emails from NSX in the last 12 hours
             query = nsx_folder.new_query()
