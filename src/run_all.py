@@ -268,6 +268,11 @@ def process_collected_data(collector: DataCollector):
     return data
 
 if __name__ == "__main__":
+    # Make sure its not a weekend day
+    if datetime.now().weekday() >= 5:
+        logging.warning("Skipping run on weekend day")
+        exit()
+    
     # Run all workflows and collect data
     collector = run_all_workflows()
     
