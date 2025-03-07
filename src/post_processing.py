@@ -279,7 +279,7 @@ class PostProcessor:
     
     def extend_gc_sheet_formulas(self, workbook):
         """
-        Find the GC sheet, identify the last two rows with data, and use Excel's
+        Find the GC sheet, identify the last three rows with data, and use Excel's
         autofill functionality to extend the formulas down one more row.
         
         Args:
@@ -300,36 +300,38 @@ class PostProcessor:
                 if gc_sheet.cell(row=row, column=1).value is not None:
                     last_row = row
             
-            if last_row < 3:  # Need at least 2 rows to extend formulas
-                logger.warning("Not enough data rows in GC sheet to extend formulas")
+            if last_row < 4:  # Need at least 3 rows to extend formulas
+                logger.warning("Not enough data rows in GC sheet to extend formulas (need at least 3)")
                 return
                 
-            # The two source rows for the formula patterns
-            source_row1 = last_row - 1
-            source_row2 = last_row
+            # The three source rows for the formula patterns
+            source_row1 = last_row - 2
+            source_row2 = last_row - 1
+            source_row3 = last_row
             
             # Target row where we want to extend the formulas
             target_row = last_row + 1
             
-            logger.info(f"Extending formulas from rows {source_row1} and {source_row2} to row {target_row}")
+            logger.info(f"Extending formulas from rows {source_row1}, {source_row2}, and {source_row3} to row {target_row}")
             
             # First, we'll find all columns with formulas in the source rows
             formula_columns = []
             for col in range(1, gc_sheet.max_column + 1):
                 cell1 = gc_sheet.cell(row=source_row1, column=col)
                 cell2 = gc_sheet.cell(row=source_row2, column=col)
+                cell3 = gc_sheet.cell(row=source_row3, column=col)
                 
-                # Check if either of the source cells has a formula
-                if isinstance(cell1.value, str) and cell1.value.startswith('='):
-                    formula_columns.append(col)
-                elif isinstance(cell2.value, str) and cell2.value.startswith('='):
+                # Check if any of the source cells has a formula
+                if (isinstance(cell1.value, str) and cell1.value.startswith('=')) or \
+                   (isinstance(cell2.value, str) and cell2.value.startswith('=')) or \
+                   (isinstance(cell3.value, str) and cell3.value.startswith('=')):
                     formula_columns.append(col)
             
             # Now copy non-formula values directly (like dates)
             for col in range(1, gc_sheet.max_column + 1):
                 if col not in formula_columns:
                     # Copy the value and format from the last row
-                    source_cell = gc_sheet.cell(row=source_row2, column=col)
+                    source_cell = gc_sheet.cell(row=source_row3, column=col)
                     target_cell = gc_sheet.cell(row=target_row, column=col)
                     
                     # For dates, increment by one day
@@ -407,32 +409,38 @@ class PostProcessor:
             for col in formula_columns:
                 cell1 = gc_sheet.cell(row=source_row1, column=col)
                 cell2 = gc_sheet.cell(row=source_row2, column=col)
+                cell3 = gc_sheet.cell(row=source_row3, column=col)
                 target_cell = gc_sheet.cell(row=target_row, column=col)
                 
                 # Check if we can detect a pattern in the formulas
-                if isinstance(cell1.value, str) and isinstance(cell2.value, str):
-                    # Both cells have formulas, try to detect the pattern and extend it
+                if isinstance(cell1.value, str) and isinstance(cell2.value, str) and isinstance(cell3.value, str):
+                    # All three cells have formulas, try to detect the pattern and extend it
                     formula1 = cell1.value
                     formula2 = cell2.value
+                    formula3 = cell3.value
                     
-                    # Simple pattern: look for row references that changed
-                    new_formula = self._extend_formula_pattern(formula1, formula2, target_row)
+                    # Use pattern from all three rows to predict the next formula
+                    new_formula = self._extend_formula_pattern_three_rows(formula1, formula2, formula3, target_row)
                     if new_formula:
                         target_cell.value = new_formula
                         # Copy formatting from the last row
-                        self._copy_cell_format(cell2, target_cell)
+                        self._copy_cell_format(cell3, target_cell)
                     else:
-                        # If pattern detection fails, just copy the last formula
-                        target_cell.value = formula2
-                        self._copy_cell_format(cell2, target_cell)
-                elif isinstance(cell2.value, str) and cell2.value.startswith('='):
+                        # If pattern detection fails, just copy and adjust the last formula
+                        # Try to adjust row references
+                        row_diff = target_row - source_row3
+                        new_formula = self._adjust_row_references(formula3, row_diff)
+                        target_cell.value = new_formula
+                        self._copy_cell_format(cell3, target_cell)
+                        logger.info(f"Could not detect 3-row pattern, adjusted last formula: {new_formula}")
+                elif isinstance(cell3.value, str) and cell3.value.startswith('='):
                     # Only the last row has a formula, just copy and adjust it
-                    formula = cell2.value
+                    formula = cell3.value
                     # Try to adjust row references
-                    row_diff = target_row - source_row2
+                    row_diff = target_row - source_row3
                     new_formula = self._adjust_row_references(formula, row_diff)
                     target_cell.value = new_formula
-                    self._copy_cell_format(cell2, target_cell)
+                    self._copy_cell_format(cell3, target_cell)
             
             logger.info(f"Successfully extended formulas to row {target_row} in GC sheet")
             
@@ -502,6 +510,91 @@ class PostProcessor:
         except Exception as e:
             logger.warning(f"Error extending formula pattern: {str(e)}")
             return None
+    
+    def _extend_formula_pattern_three_rows(self, formula1, formula2, formula3, target_row):
+        """
+        Try to detect a pattern across three formulas and extend it to create a new formula.
+        This version uses three source rows instead of two for more reliable pattern detection.
+        
+        Args:
+            formula1: Formula from the first source row
+            formula2: Formula from the second source row
+            formula3: Formula from the third source row
+            target_row: Target row number for the new formula
+            
+        Returns:
+            str: The extended formula for the target row, or None if pattern can't be detected
+        """
+        try:
+            # Check if all formulas are identical
+            if formula1 == formula2 == formula3:
+                return formula3  # No pattern to extend, just reuse
+            
+            # Check if we have a consistent pattern across 3 rows
+            import re
+            
+            # Find all cell references in all formulas
+            cell_ref_pattern = r'([A-Z]+)(\d+)'
+            refs1 = re.findall(cell_ref_pattern, formula1)
+            refs2 = re.findall(cell_ref_pattern, formula2)
+            refs3 = re.findall(cell_ref_pattern, formula3)
+            
+            # We need the same number of references in all formulas to detect a pattern
+            if len(refs1) == len(refs2) == len(refs3):
+                # Check if we have a consistent row increment pattern
+                consistent_pattern = True
+                row_diffs = []
+                
+                # Compare row numbers between consecutive formulas
+                for i in range(len(refs1)):
+                    col1, row1 = refs1[i]
+                    col2, row2 = refs2[i]
+                    col3, row3 = refs3[i]
+                    
+                    # Check if column letters are the same
+                    if col1 != col2 or col2 != col3:
+                        consistent_pattern = False
+                        break
+                        
+                    # Calculate row differences
+                    diff1 = int(row2) - int(row1)
+                    diff2 = int(row3) - int(row2)
+                    
+                    # Check if the differences are the same
+                    if diff1 != diff2:
+                        consistent_pattern = False
+                        break
+                        
+                    row_diffs.append(diff1)  # Store the difference for later use
+                
+                if consistent_pattern and row_diffs:
+                    # We have a consistent pattern, now apply it to formula3
+                    replacements = {}
+                    
+                    for i in range(len(refs3)):
+                        col, row = refs3[i]
+                        diff = row_diffs[min(i, len(row_diffs) - 1)]  # Use the appropriate difference
+                        new_row = int(row) + diff
+                        replacements[f"{col}{row}"] = f"{col}{new_row}"
+                    
+                    # Apply replacements to formula3
+                    new_formula = formula3
+                    for old_ref, new_ref in replacements.items():
+                        new_formula = new_formula.replace(old_ref, new_ref)
+                    
+                    return new_formula
+            
+            # If the 3-row pattern detection fails, try the 2-row approach with the most recent rows
+            logger.info("Three-row pattern detection failed, falling back to two-row detection")
+            return self._extend_formula_pattern(formula2, formula3, target_row)
+            
+        except Exception as e:
+            logger.warning(f"Error extending three-row formula pattern: {str(e)}")
+            # Try the 2-row method as fallback
+            try:
+                return self._extend_formula_pattern(formula2, formula3, target_row)
+            except Exception:
+                return None
     
     def _adjust_row_references(self, formula, row_diff):
         """
