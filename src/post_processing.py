@@ -143,18 +143,23 @@ class PostProcessor:
             logger.info(f"Adding new data at row {next_row}")
             
             # Get today's date - Using today's date, but the formatting will be adjusted
-            today_date = datetime.now()
+            today_date = datetime.date(datetime.now())
             
             # Write today's date in the first column and copy formatting from template
             new_date_cell = input_sheet.cell(row=next_row, column=1)
             template_date_cell = input_sheet.cell(row=template_row, column=1)
             
-            # Set the value but keep the existing number format
+            # Set the value (date only, no timestamp)
             new_date_cell.value = today_date
             
-            # Set the date format explicitly to dd/mm/yyyy
-            new_date_cell.number_format = 'dd/mm/yyyy'
-            logger.info(f"Set date in cell A{next_row} to {today_date.strftime('%d/%m/%Y')} with dd/mm/yyyy format")
+            # Preserve the existing custom date format (dd-mmm-yy) from the template cell
+            if template_date_cell.number_format:
+                new_date_cell.number_format = template_date_cell.number_format
+                logger.info(f"Preserved existing date format: {template_date_cell.number_format}")
+            else:
+                # Fallback to dd-mmm-yy if no format found in template
+                new_date_cell.number_format = 'dd-mmm-yy'
+                logger.info(f"Set default date format: dd-mmm-yy")
             
             # Copy other formatting properties from template cell
             self._copy_cell_format(template_date_cell, new_date_cell)
@@ -334,11 +339,21 @@ class PostProcessor:
                         if isinstance(last_date, datetime):
                             # Increment by one day
                             new_date = last_date + pd.Timedelta(days=1)
+                            # Make sure we only have the date part, no time
+                            if hasattr(new_date, 'date'):
+                                new_date = new_date.date()
                             target_cell.value = new_date
                             
-                            # Apply dd/mm/yyyy format specifically
-                            target_cell.number_format = 'dd/mm/yyyy'
-                            logger.info(f"Set date in cell A{target_row} to {new_date.strftime('%d/%m/%Y')}")
+                            # Preserve the existing date format from source cell
+                            if source_cell.number_format:
+                                target_cell.number_format = source_cell.number_format
+                                logger.info(f"Preserved existing date format in GC sheet: {source_cell.number_format}")
+                            else:
+                                # Fallback to dd-mmm-yy if no format found
+                                target_cell.number_format = 'dd-mmm-yy'
+                                logger.info(f"Set default date format in GC sheet: dd-mmm-yy")
+                                
+                            logger.info(f"Set date in GC sheet cell A{target_row} to {new_date}")
                         else:
                             # If it's not already a date, try to parse it
                             try:
@@ -346,21 +361,32 @@ class PostProcessor:
                                     # Try to parse the string date
                                     parsed_date = pd.to_datetime(last_date)
                                     new_date = parsed_date + pd.Timedelta(days=1)
+                                    # Make sure we only have the date part, no time
+                                    if hasattr(new_date, 'date'):
+                                        new_date = new_date.date()
                                     target_cell.value = new_date
-                                    target_cell.number_format = 'dd/mm/yyyy'
-                                    logger.info(f"Set date in cell A{target_row} to {new_date.strftime('%d/%m/%Y')}")
+                                    
+                                    # Preserve format or use default
+                                    if source_cell.number_format:
+                                        target_cell.number_format = source_cell.number_format
+                                    else:
+                                        target_cell.number_format = 'dd-mmm-yy'
+                                        
+                                    logger.info(f"Set date in GC sheet cell A{target_row} to {new_date}")
                                 else:
                                     # If we can't determine the date, use today's date
-                                    today = datetime.now()
+                                    today = datetime.now().date()
                                     target_cell.value = today
-                                    target_cell.number_format = 'dd/mm/yyyy'
-                                    logger.warning(f"Could not determine date pattern. Set cell A{target_row} to today's date: {today.strftime('%d/%m/%Y')}")
+                                    
+                                    # Use default format
+                                    target_cell.number_format = 'dd-mmm-yy'
+                                    logger.warning(f"Could not determine date pattern. Set GC sheet cell A{target_row} to today's date: {today}")
                             except Exception as e:
                                 # If all else fails, use today's date
-                                today = datetime.now()
+                                today = datetime.now().date()
                                 target_cell.value = today
-                                target_cell.number_format = 'dd/mm/yyyy'
-                                logger.warning(f"Error parsing date: {str(e)}. Set cell A{target_row} to today's date: {today.strftime('%d/%m/%Y')}")
+                                target_cell.number_format = 'dd-mmm-yy'
+                                logger.warning(f"Error parsing date: {str(e)}. Set GC sheet cell A{target_row} to today's date: {today}")
                     elif isinstance(source_cell.value, datetime):
                         # For other date columns, still increment by one day
                         target_cell.value = source_cell.value + pd.Timedelta(days=1)
