@@ -279,8 +279,8 @@ class PostProcessor:
     
     def extend_gc_sheet_formulas(self, workbook):
         """
-        Find the GC sheet, identify the last row with data, and simply copy it
-        to the next row, updating the SETTLE_DATE to the next day.
+        Find the GC sheet, identify the last row with data, and copy it to the next row.
+        Let Excel handle formula adjustments, and update the SETTLE_DATE to the next day.
         
         Args:
             workbook: The openpyxl workbook object
@@ -305,75 +305,63 @@ class PostProcessor:
             # Target row where we want to add data
             target_row = last_row + 1
             
-            # Find the SETTLE_DATE column if it exists
+            # Find the SETTLE_DATE column - search by column header
             settle_date_col = None
             for col in range(1, gc_sheet.max_column + 1):
                 header_cell = gc_sheet.cell(row=1, column=col)
-                if header_cell.value == "SETTLE_DATE":
+                if header_cell.value and isinstance(header_cell.value, str) and "SETTLE" in header_cell.value.upper():
                     settle_date_col = col
+                    logger.info(f"Found SETTLE_DATE column at column {settle_date_col} (header: {header_cell.value})")
                     break
             
             if settle_date_col is None:
-                logger.warning("Could not find SETTLE_DATE column in GC sheet")
-            else:
-                logger.info(f"Found SETTLE_DATE column at column {settle_date_col}")
+                logger.warning("Could not find SETTLE_DATE column in GC sheet, will try to look for date values instead")
+                # Alternative approach: look for a column that contains date values
+                for col in range(1, gc_sheet.max_column + 1):
+                    cell_value = gc_sheet.cell(row=last_row, column=col).value
+                    if isinstance(cell_value, datetime):
+                        settle_date_col = col
+                        logger.info(f"Found date column at column {settle_date_col} based on data type")
+                        break
             
             # Now copy all cells from the last row to the target row
+            # We'll do this in two steps:
+            # 1. First, copy all values, formulas, and formats
+            # 2. Then, specifically update the SETTLE_DATE if found
+            
+            # Step 1: Copy all cells
             for col in range(1, gc_sheet.max_column + 1):
                 source_cell = gc_sheet.cell(row=last_row, column=col)
                 target_cell = gc_sheet.cell(row=target_row, column=col)
                 
-                # Check if the cell contains a formula
-                if isinstance(source_cell.value, str) and source_cell.value.startswith('='):
-                    # Copy the formula directly
-                    target_cell.value = source_cell.value
-                    logger.debug(f"Copied formula from cell {source_cell.coordinate} to {target_cell.coordinate}")
-                elif col == settle_date_col and source_cell.value is not None:
-                    # Special handling for SETTLE_DATE column
-                    last_date = source_cell.value
-                    if isinstance(last_date, datetime):
-                        # Increment by one day
-                        new_date = last_date + pd.Timedelta(days=1)
-                        # Make sure we only have the date part, no time
-                        if hasattr(new_date, 'date'):
-                            new_date = new_date.date()
-                        target_cell.value = new_date
+                # Get formula or value from source cell
+                if source_cell.value is not None:
+                    if isinstance(source_cell.value, str) and source_cell.value.startswith('='):
+                        # This is a formula, we'll adjust it
+                        formula = source_cell.value
                         
-                        # Preserve the existing date format
-                        if source_cell.number_format:
-                            target_cell.number_format = source_cell.number_format
-                        else:
-                            target_cell.number_format = 'dd-mmm-yy'
-                            
-                        logger.info(f"Updated SETTLE_DATE in cell {target_cell.coordinate} to {new_date}")
+                        # Replace row references
+                        # Example: If formula contains A10, B10, etc. and we're copying from row 10 to 11,
+                        # we need to change A10, B10 to A11, B11
+                        import re
+                        
+                        # Find all cell references in the formula
+                        # Example pattern: A10, B12, AA123, etc.
+                        cell_ref_pattern = r'([A-Z]+)(' + str(last_row) + r')'
+                        refs = re.findall(cell_ref_pattern, formula)
+                        
+                        # Create new formula with adjusted references
+                        new_formula = formula
+                        for col_ref, row_ref in refs:
+                            old_ref = f"{col_ref}{row_ref}"
+                            new_ref = f"{col_ref}{target_row}"
+                            new_formula = new_formula.replace(old_ref, new_ref)
+                        
+                        target_cell.value = new_formula
+                        logger.debug(f"Adjusted formula from {formula} to {new_formula}")
                     else:
-                        # Try to parse the date if it's not already a datetime
-                        try:
-                            if isinstance(last_date, str):
-                                parsed_date = pd.to_datetime(last_date)
-                                new_date = parsed_date + pd.Timedelta(days=1)
-                                if hasattr(new_date, 'date'):
-                                    new_date = new_date.date()
-                                target_cell.value = new_date
-                                
-                                # Preserve format or use default
-                                if source_cell.number_format:
-                                    target_cell.number_format = source_cell.number_format
-                                else:
-                                    target_cell.number_format = 'dd-mmm-yy'
-                                    
-                                logger.info(f"Updated SETTLE_DATE in cell {target_cell.coordinate} to {new_date}")
-                            else:
-                                # Fallback: copy the value and log a warning
-                                target_cell.value = source_cell.value
-                                logger.warning(f"Could not parse SETTLE_DATE value {last_date}, copying unchanged")
-                        except Exception as e:
-                            # If all else fails, just copy the value
-                            target_cell.value = source_cell.value
-                            logger.warning(f"Error updating SETTLE_DATE: {str(e)}, copying unchanged")
-                else:
-                    # For non-formula cells, copy the value directly
-                    target_cell.value = source_cell.value
+                        # This is a regular value, just copy it
+                        target_cell.value = source_cell.value
                 
                 # Copy number format if available
                 if source_cell.number_format:
@@ -385,7 +373,51 @@ class PostProcessor:
                 # Apply other formatting (with font size 12)
                 self._copy_cell_format(source_cell, target_cell)
             
-            logger.info(f"Successfully copied last row to row {target_row} in GC sheet")
+            # Step 2: If we found a SETTLE_DATE column, update the date
+            if settle_date_col:
+                logger.info(f"Updating SETTLE_DATE in column {settle_date_col}")
+                source_cell = gc_sheet.cell(row=last_row, column=settle_date_col)
+                target_cell = gc_sheet.cell(row=target_row, column=settle_date_col)
+                
+                # Get the current date value
+                current_date = source_cell.value
+                
+                # Try to convert to datetime if it's not already
+                if not isinstance(current_date, datetime):
+                    try:
+                        if isinstance(current_date, str):
+                            current_date = pd.to_datetime(current_date)
+                        else:
+                            # If we can't parse it, log a warning and skip date update
+                            logger.warning(f"SETTLE_DATE value '{current_date}' is not a recognizable date format")
+                            # We'll continue with other operations
+                    except Exception as e:
+                        logger.warning(f"Error parsing SETTLE_DATE: {str(e)}")
+                        # We'll continue with other operations
+                
+                # If we have a valid date, increment it by one day
+                if isinstance(current_date, datetime):
+                    new_date = current_date + pd.Timedelta(days=1)
+                    
+                    # Make sure we only have the date part, no time
+                    if hasattr(new_date, 'date'):
+                        new_date = new_date.date()
+                    
+                    # Set the new date in the target cell
+                    target_cell.value = new_date
+                    
+                    # Preserve the existing date format or use a default
+                    if source_cell.number_format:
+                        target_cell.number_format = source_cell.number_format
+                    else:
+                        target_cell.number_format = 'dd-mmm-yy'
+                    
+                    logger.info(f"Updated SETTLE_DATE from {current_date} to {new_date}")
+                    
+                    # Reapply formatting to ensure it shows correctly
+                    self._copy_cell_format(source_cell, target_cell)
+            
+            logger.info(f"Successfully copied last row to row {target_row} in GC sheet with adjusted formulas")
             
         except Exception as e:
             logger.error(f"Error extending GC sheet: {str(e)}")
