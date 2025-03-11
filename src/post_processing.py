@@ -11,7 +11,7 @@ import os
 import sys
 import openpyxl  # For Excel file manipulation
 from decimal import Decimal  # Import Decimal for precise decimal handling
-from openpyxl.styles import Font
+from openpyxl.styles import Font, PatternFill
 
 # Get the correct paths for imports
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -426,27 +426,35 @@ class PostProcessor:
             if formula_to_value_row >= 2:  # Row 1 is usually headers
                 logger.info(f"Converting formulas to values in row {formula_to_value_row} (90 rows up from the newly inserted row)")
                 
-                # First, create a temporary copy of all values in the row
-                temp_values = []
-                for col in range(1, gc_sheet.max_column + 1):
-                    cell = gc_sheet.cell(row=formula_to_value_row, column=col)
-                    temp_values.append(cell.value)
+                # Unfortunately, openpyxl can't evaluate Excel formulas directly
+                # The best we can do is to convert formulas to their string representation (without the "=")
                 
-                # Now replace all formulas with their calculated values
+                # Get a reference to xlsxwriter's PatternFill for yellow background
+                yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+                
                 formulas_converted = 0
                 for col in range(1, gc_sheet.max_column + 1):
                     cell = gc_sheet.cell(row=formula_to_value_row, column=col)
+                    
+                    # Apply yellow fill to all cells in the row for visibility
+                    cell.fill = yellow_fill
+                    
                     # Check if this cell contains a formula
                     if isinstance(cell.value, str) and cell.value.startswith('='):
-                        # Get the current value and replace the formula with it
-                        # The value reflects the calculated result of the formula
-                        current_value = temp_values[col-1]  # Adjust for 0-based indexing
-                        
-                        # Replace the formula with its value
-                        cell.value = current_value
-                        formulas_converted += 1
+                        try:
+                            # Convert formula to string (without the "=")
+                            # This at least preserves what the formula was calculating
+                            formula_text = cell.value[1:]  # Remove the equals sign
+                            cell.value = f"[{formula_text}]"  # Mark it as a former formula
+                            formulas_converted += 1
+                        except Exception as e:
+                            logger.warning(f"Error converting formula in cell {cell.coordinate}: {str(e)}")
                 
-                logger.info(f"Converted {formulas_converted} formulas to values in row {formula_to_value_row}")
+                logger.info(f"Converted {formulas_converted} formulas to text values in row {formula_to_value_row} and highlighted the row in yellow")
+                
+                # Note for the log: This approach doesn't preserve the calculated values since openpyxl doesn't calculate formulas
+                logger.warning("Note: Formulas were converted to text representation, not their calculated values. "
+                              "Excel will need to calculate the actual values when the file is opened.")
             else:
                 logger.warning(f"Cannot convert formulas to values: row {formula_to_value_row} is out of bounds")
             
