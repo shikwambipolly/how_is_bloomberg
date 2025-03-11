@@ -419,6 +419,37 @@ class PostProcessor:
             
             logger.info(f"Successfully copied last row to row {target_row} in GC sheet with adjusted formulas")
             
+            # Step 3: Convert formulas to values for the row that's 90 rows up from the newly inserted row
+            formula_to_value_row = target_row - 90
+            
+            # Make sure the row exists and is within bounds
+            if formula_to_value_row >= 2:  # Row 1 is usually headers
+                logger.info(f"Converting formulas to values in row {formula_to_value_row} (90 rows up from the newly inserted row)")
+                
+                # First, create a temporary copy of all values in the row
+                temp_values = []
+                for col in range(1, gc_sheet.max_column + 1):
+                    cell = gc_sheet.cell(row=formula_to_value_row, column=col)
+                    temp_values.append(cell.value)
+                
+                # Now replace all formulas with their calculated values
+                formulas_converted = 0
+                for col in range(1, gc_sheet.max_column + 1):
+                    cell = gc_sheet.cell(row=formula_to_value_row, column=col)
+                    # Check if this cell contains a formula
+                    if isinstance(cell.value, str) and cell.value.startswith('='):
+                        # Get the current value and replace the formula with it
+                        # The value reflects the calculated result of the formula
+                        current_value = temp_values[col-1]  # Adjust for 0-based indexing
+                        
+                        # Replace the formula with its value
+                        cell.value = current_value
+                        formulas_converted += 1
+                
+                logger.info(f"Converted {formulas_converted} formulas to values in row {formula_to_value_row}")
+            else:
+                logger.warning(f"Cannot convert formulas to values: row {formula_to_value_row} is out of bounds")
+            
         except Exception as e:
             logger.error(f"Error extending GC sheet: {str(e)}")
             # Don't raise the exception - we don't want to fail the entire workflow
