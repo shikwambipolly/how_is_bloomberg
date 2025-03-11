@@ -419,45 +419,6 @@ class PostProcessor:
             
             logger.info(f"Successfully copied last row to row {target_row} in GC sheet with adjusted formulas")
             
-            # Step 3: Convert formulas to values for the row that's 90 rows up from the newly inserted row
-            formula_to_value_row = target_row - 90
-            
-            # Make sure the row exists and is within bounds
-            if formula_to_value_row >= 2:  # Row 1 is usually headers
-                logger.info(f"Converting formulas to values in row {formula_to_value_row} (90 rows up from the newly inserted row)")
-                
-                # Unfortunately, openpyxl can't evaluate Excel formulas directly
-                # The best we can do is to convert formulas to their string representation (without the "=")
-                
-                # Get a reference to xlsxwriter's PatternFill for yellow background
-                yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
-                
-                formulas_converted = 0
-                for col in range(1, gc_sheet.max_column + 1):
-                    cell = gc_sheet.cell(row=formula_to_value_row, column=col)
-                    
-                    # Apply yellow fill to all cells in the row for visibility
-                    cell.fill = yellow_fill
-                    
-                    # Check if this cell contains a formula
-                    if isinstance(cell.value, str) and cell.value.startswith('='):
-                        try:
-                            # Convert formula to string (without the "=")
-                            # This at least preserves what the formula was calculating
-                            formula_text = cell.value[1:]  # Remove the equals sign
-                            cell.value = f"[{formula_text}]"  # Mark it as a former formula
-                            formulas_converted += 1
-                        except Exception as e:
-                            logger.warning(f"Error converting formula in cell {cell.coordinate}: {str(e)}")
-                
-                logger.info(f"Converted {formulas_converted} formulas to text values in row {formula_to_value_row} and highlighted the row in yellow")
-                
-                # Note for the log: This approach doesn't preserve the calculated values since openpyxl doesn't calculate formulas
-                logger.warning("Note: Formulas were converted to text representation, not their calculated values. "
-                              "Excel will need to calculate the actual values when the file is opened.")
-            else:
-                logger.warning(f"Cannot convert formulas to values: row {formula_to_value_row} is out of bounds")
-            
         except Exception as e:
             logger.error(f"Error extending GC sheet: {str(e)}")
             # Don't raise the exception - we don't want to fail the entire workflow
