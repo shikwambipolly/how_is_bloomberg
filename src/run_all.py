@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from get_yields_terminal import run_terminal_workflow
 from get_nsx_email import run_nsx_workflow
 from get_IJG_daily import run_ijg_workflow
@@ -139,7 +139,7 @@ def run_all_workflows():
             # Run post-processing workflow only if closing yields workflow was successful
             if closing_yields_result.success and collector.closing_yields_data is not None:
                 logging.info("Starting Post-Processing workflow...")
-                post_processing_result = run_post_processing_workflow(collector.closing_yields_data)
+                post_processing_result = run_post_processing_workflow(collector.closing_yields_data, is_weekend_mode=False)
                 collector.store_data('post_processing', post_processing_result)
                 
                 if post_processing_result.success:
@@ -268,40 +268,98 @@ def process_collected_data(collector: DataCollector):
     return data
 
 if __name__ == "__main__":
-    # Make sure its not a weekend day
-    if datetime.now().weekday() >= 5:
-        logging.warning("Skipping run on weekend day")
-        exit()
+    # Check if today is a weekend day
+    is_weekend = datetime.now().weekday() >= 5
     
-    # Run all workflows and collect data
-    collector = run_all_workflows()
-    
-    if collector:
-        # Process the collected data
-        all_data = process_collected_data(collector)
+    if is_weekend:
+        logging.info("Weekend detected - running only simplified post-processing")
         
-        # Example: Access individual DataFrames
-        bloomberg_df = collector.bloomberg_data
-        nsx_df = collector.nsx_data
-        ijg_gi_df = collector.ijg_gi_data
-        ijg_gc_df = collector.ijg_gc_data
+        try:
+            # Run post-processing workflow in weekend mode (no data needed)
+            logging.info("Starting simplified Post-Processing workflow for weekend...")
+            post_processing_result = run_post_processing_workflow(is_weekend_mode=True)
+            
+            if post_processing_result.success:
+                logging.info("Weekend Post-Processing completed successfully")
+                
+                # Build email body for weekend processing
+                subject = "✓ Weekend Bond Data Processing: Successful"
+                body = "WEEKEND BOND DATA PROCESSING REPORT\n"
+                body += "===================================\n\n"
+                body += f"Date: {datetime.now().strftime('%Y-%m-%d')}\n"
+                body += f"Time: {datetime.now().strftime('%H:%M:%S')}\n\n"
+                body += "WORKFLOW STATUS\n"
+                body += "==============\n\n"
+                body += "✓ Post-Processing with Simplified Excel Update\n"
+                body += "  • Created new row with today's date (weekend entry)\n"
+                
+                # Send the status email
+                send_workflow_email(subject, body)
+            else:
+                logging.error(f"Weekend Post-Processing failed: {post_processing_result.error}")
+                
+                # Send error email
+                subject = "✗ Weekend Bond Data Processing: Failed"
+                body = "WEEKEND BOND DATA PROCESSING REPORT\n"
+                body += "===================================\n\n"
+                body += f"Date: {datetime.now().strftime('%Y-%m-%d')}\n"
+                body += f"Time: {datetime.now().strftime('%H:%M:%S')}\n\n"
+                body += "WORKFLOW STATUS\n"
+                body += "==============\n\n"
+                body += f"✗ Post-Processing Failed\n"
+                body += f"  Error: {post_processing_result.error}\n"
+                
+                # Send the status email
+                send_workflow_email(subject, body)
+        except Exception as e:
+            error_message = f"Error in weekend post-processing: {str(e)}"
+            logging.error(error_message)
+            
+            # Send email for critical error
+            error_body = "WEEKEND BOND DATA PROCESSING REPORT\n"
+            error_body += "===================================\n\n"
+            error_body += f"Date: {datetime.now().strftime('%Y-%m-%d')}\n"
+            error_body += f"Time: {datetime.now().strftime('%H:%M:%S')}\n\n"
+            error_body += "CRITICAL ERROR\n"
+            error_body += "==============\n\n"
+            error_body += "A critical error occurred in the weekend post-processing:\n"
+            error_body += f"{str(e)}\n\n"
+            error_body += "Stack trace (if available):\n"
+            import traceback
+            error_body += traceback.format_exc()
+            
+            send_workflow_email("✗ Weekend Bond Data Processing: Critical Error", error_body)
+    else:
+        # Run all workflows and collect data for weekdays
+        logging.info("Weekday detected - running full workflow")
+        collector = run_all_workflows()
         
-        # Now you can work with the DataFrames as needed
-        # For example:
-        if bloomberg_df is not None:
-            print("\nBloomberg Data Preview:")
-            print(bloomberg_df.head())
-        
-        if nsx_df is not None:
-            print("\nNSX Data Preview:")
-            print(nsx_df.head())
-        
-        if ijg_gi_df is not None:
-            print("\nIJG GI Data Preview:")
-            print(ijg_gi_df.head())
-        
-        if ijg_gc_df is not None:
-            print("\nIJG GC Data Preview:")
-            print(ijg_gc_df.head()) 
+        if collector:
+            # Process the collected data
+            all_data = process_collected_data(collector)
+            
+            # Example: Access individual DataFrames
+            bloomberg_df = collector.bloomberg_data
+            nsx_df = collector.nsx_data
+            ijg_gi_df = collector.ijg_gi_data
+            ijg_gc_df = collector.ijg_gc_data
+            
+            # Now you can work with the DataFrames as needed
+            # For example:
+            if bloomberg_df is not None:
+                print("\nBloomberg Data Preview:")
+                print(bloomberg_df.head())
+            
+            if nsx_df is not None:
+                print("\nNSX Data Preview:")
+                print(nsx_df.head())
+            
+            if ijg_gi_df is not None:
+                print("\nIJG GI Data Preview:")
+                print(ijg_gi_df.head())
+            
+            if ijg_gc_df is not None:
+                print("\nIJG GC Data Preview:")
+                print(ijg_gc_df.head()) 
         
         

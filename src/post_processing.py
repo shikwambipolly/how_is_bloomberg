@@ -5,7 +5,7 @@ It is designed to run as an add-on to the main project and does not affect email
 
 import pandas as pd
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import os
 import sys
@@ -55,6 +55,13 @@ class PostProcessor:
         logger.info("Initialized PostProcessor with closing yields data")
         self.excel_path = Path(Config.BASE_DIR) / "Bond Price Calculator.xlsx"
         
+        # Detect if we're running on a weekend
+        self.is_weekend = datetime.now().weekday() >= 5
+        if self.is_weekend:
+            logger.info("Weekend processing detected")
+        else:
+            logger.info("Weekday processing detected")
+    
     def find_last_data_row(self, sheet):
         """
         Find the last row with data in the Excel sheet.
@@ -143,7 +150,7 @@ class PostProcessor:
             logger.info(f"Adding new data at row {next_row}")
             
             # Get today's date - Using today's date, but the formatting will be adjusted
-            today_date = datetime.date(datetime.now())
+            today_date = datetime.now().date()
             
             # Write today's date in the first column and copy formatting from template
             new_date_cell = input_sheet.cell(row=next_row, column=1)
@@ -152,14 +159,10 @@ class PostProcessor:
             # Set the value (date only, no timestamp)
             new_date_cell.value = today_date
             
-            # Preserve the existing custom date format (dd-mmm-yy) from the template cell
+            # Preserve the existing custom date format from the template cell
             if template_date_cell.number_format:
                 new_date_cell.number_format = template_date_cell.number_format
                 logger.info(f"Preserved existing date format: {template_date_cell.number_format}")
-            else:
-                # Fallback to dd-mmm-yy if no format found in template
-                new_date_cell.number_format = 'dd-mmm-yy'
-                logger.info(f"Set default date format: dd-mmm-yy")
             
             # Copy other formatting properties from template cell
             self._copy_cell_format(template_date_cell, new_date_cell)
@@ -184,11 +187,7 @@ class PostProcessor:
                     else:
                         new_cell.value = yield_value
                     
-                    # Set a consistent number format for yield values 
-                    # (typically yields should show 4 decimal places)
-                    new_cell.number_format = '0.0000'
-                    
-                    # Apply other formatting properties (including font size 12)
+                    # Preserve existing number format by copying formatting
                     self._copy_cell_format(template_cell, new_cell)
                     
                     securities_written += 1
@@ -271,6 +270,13 @@ class PostProcessor:
                     target_cell.protection = source_cell.protection
             except Exception as e:
                 logger.debug(f"Error copying protection: {str(e)}")
+            
+            try:
+                # Always copy number format if available
+                if source_cell.number_format:
+                    target_cell.number_format = source_cell.number_format
+            except Exception as e:
+                logger.debug(f"Error copying number format: {str(e)}")
             
             logger.debug(f"Applied formatting to cell {target_cell.coordinate} with font size 12")
         except Exception as e:
@@ -406,15 +412,13 @@ class PostProcessor:
                     # Set the new date in the target cell
                     target_cell.value = new_date
                     
-                    # Preserve the existing date format or use a default
+                    # Preserve existing date format - let Excel handle display conversion
                     if source_cell.number_format:
                         target_cell.number_format = source_cell.number_format
-                    else:
-                        target_cell.number_format = 'dd-mmm-yy'
                     
                     logger.info(f"Updated SETTLE_DATE from {current_date} to {new_date}")
                     
-                    # Reapply formatting to ensure it shows correctly
+                    # Reapply other formatting to ensure it shows correctly
                     self._copy_cell_format(source_cell, target_cell)
             
             logger.info(f"Successfully copied last row to row {target_row} in GC sheet with adjusted formulas")
@@ -447,32 +451,136 @@ class PostProcessor:
             logger.error(f"Error saving post-processed data: {str(e)}")
             raise
 
-def run_post_processing_workflow(closing_yields_data: pd.DataFrame) -> WorkflowResult:
+    def process_weekend_update(self) -> bool:
+        """
+        Simplified weekend processing method.
+        Instead of using closing yields data, this method simply:
+        1. Opens the existing Excel file
+        2. Finds the last row with data
+        3. Copies that row to a new row
+        4. Updates the date column to today's date (Saturday or Sunday)
+        
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            logger.info(f"Starting simplified weekend processing using Excel file at {self.excel_path}")
+            
+            if not self.excel_path.exists():
+                logger.error(f"Excel file not found at {self.excel_path}")
+                return False
+                
+            # Load the workbook
+            workbook = openpyxl.load_workbook(self.excel_path)
+            
+            # Check if Input sheet exists
+            if "Input" not in workbook.sheetnames:
+                logger.error("Could not find 'Input' sheet in Excel file")
+                return False
+                
+            input_sheet = workbook["Input"]
+            
+            # Find the last row with data
+            last_row = self.find_last_data_row(input_sheet)
+            target_row = last_row + 1
+            
+            logger.info(f"Found last data row at {last_row}, will insert new row at {target_row}")
+            
+            # Copy all cells from last row to target row
+            for col in range(1, input_sheet.max_column + 1):
+                source_cell = input_sheet.cell(row=last_row, column=col)
+                target_cell = input_sheet.cell(row=target_row, column=col)
+                
+                # Copy value
+                target_cell.value = source_cell.value
+                
+                # Copy formatting
+                self._copy_cell_format(source_cell, target_cell)
+            
+            # Update the date column (column 1) to today's date (Saturday or Sunday)
+            last_date = input_sheet.cell(row=last_row, column=1).value
+            if isinstance(last_date, datetime):
+                # Use today's date (which will be a Saturday or Sunday in weekend mode)
+                # Use only the date part, no time component
+                today_date = datetime.now().date()
+                
+                logger.info(f"Updating date from {last_date} to today's date: {today_date}")
+                input_sheet.cell(row=target_row, column=1).value = today_date
+                
+                # Preserve the existing date format from the template
+                # Excel will handle the display conversion automatically
+                if input_sheet.cell(row=last_row, column=1).number_format:
+                    input_sheet.cell(row=target_row, column=1).number_format = input_sheet.cell(row=last_row, column=1).number_format
+            else:
+                logger.warning(f"Date cell does not contain a valid date: {last_date}")
+            
+            # Save the workbook
+            workbook.save(self.excel_path)
+            logger.info(f"Successfully saved updated Excel file to {self.excel_path}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error in weekend processing: {str(e)}")
+            return False
+
+def run_post_processing_workflow(closing_yields_data: pd.DataFrame = None, is_weekend_mode: bool = False) -> WorkflowResult:
     """
-    Run the post-processing workflow using the closing yields data.
-    This function is called from run_all.py when the closing yields workflow
-    has completed successfully.
+    Run the post-processing workflow.
+    
+    In weekend mode:
+    - Uses simplified processing that directly copies the last row in the Excel file
+    - Does not require closing yields data
+    
+    In weekday mode:
+    - Uses the full processing with closing yields data
+    - Requires closing yields data to be provided
     
     Args:
-        closing_yields_data: DataFrame containing the processed closing yields
+        closing_yields_data: DataFrame containing the processed closing yields (required for weekday mode)
+        is_weekend_mode: Flag indicating if running in weekend mode with simplified processing
         
     Returns:
         WorkflowResult containing success status and processed data
     """
     try:
-        logger.info("Starting post-processing workflow")
-        
-        # Initialize processor with closing yields data
-        processor = PostProcessor(closing_yields_data)
-        
-        # Process the data
-        results_df = processor.process_data()
-        
-        # Save results
-        output_file = processor.save_results(results_df)
-        
-        logger.info("Successfully completed post-processing workflow")
-        return WorkflowResult(success=True, data=results_df)
+        if is_weekend_mode:
+            logger.info("Starting post-processing workflow in WEEKEND MODE with simplified processing")
+            
+            # For weekend mode, we don't need closing yields data
+            processor = PostProcessor(pd.DataFrame() if closing_yields_data is None else closing_yields_data)
+            
+            # Use the simplified weekend processing method
+            success = processor.process_weekend_update()
+            
+            if success:
+                logger.info("Successfully completed weekend post-processing")
+                return WorkflowResult(success=True, data=pd.DataFrame())
+            else:
+                error_msg = "Weekend post-processing failed"
+                logger.error(error_msg)
+                return WorkflowResult(success=False, error=error_msg)
+        else:
+            # Weekday mode requires closing yields data
+            if closing_yields_data is None:
+                error_msg = "Closing yields data is required for weekday processing"
+                logger.error(error_msg)
+                return WorkflowResult(success=False, error=error_msg)
+                
+            logger.info("Starting post-processing workflow")
+            
+            # Initialize processor with closing yields data
+            processor = PostProcessor(closing_yields_data)
+            
+            # Process the data
+            results_df = processor.process_data()
+            
+            # Save results
+            output_file = processor.save_results(results_df)
+            
+            logger.info("Successfully completed post-processing workflow")
+            
+            return WorkflowResult(success=True, data=results_df)
         
     except Exception as e:
         error_msg = f"Error in post-processing workflow: {str(e)}"
@@ -482,26 +590,47 @@ def run_post_processing_workflow(closing_yields_data: pd.DataFrame) -> WorkflowR
 # This section only runs if you execute this file directly (not when imported)
 if __name__ == "__main__":
     try:
-        # Get the latest closing yields file for testing
-        today_str = datetime.now().strftime("%Y%m%d")
-        closing_yields_file = Config.get_output_path() / f'closing_yields_{today_str}.csv'
+        # Check if today is a weekend
+        is_weekend = datetime.now().weekday() >= 5
         
-        if not closing_yields_file.exists():
-            print(f"Error: Could not find closing yields file at {closing_yields_file}")
-            exit(1)
-        
-        # Load the closing yields data
-        closing_yields_data = pd.read_csv(closing_yields_file)
-        
-        # Run the post-processing workflow
-        result = run_post_processing_workflow(closing_yields_data)
-        
-        if result.success:
-            print("Post-processing completed successfully")
-            print("Post-processed data preview:")
-            print(result.data.head())
+        if is_weekend:
+            print("Weekend detected - using simplified Excel update process")
+            
+            # Use simplified weekend processing that doesn't require closing yields data
+            result = run_post_processing_workflow(is_weekend_mode=True)
+            
+            if result.success:
+                print("Weekend post-processing completed successfully")
+                print("The last row in the Excel file was copied and the date was updated")
+            else:
+                print(f"Weekend post-processing failed: {result.error}")
         else:
-            print(f"Post-processing failed: {result.error}")
+            print("Weekday detected - looking for closing yields data")
+            
+            # On weekdays, use today's file if it exists
+            today_str = datetime.now().strftime("%Y%m%d")
+            closing_yields_file = Config.get_output_path() / f'closing_yields_{today_str}.csv'
+            
+            if not closing_yields_file.exists():
+                print(f"Error: Today's closing yields file not found at {closing_yields_file}")
+                print("Please run the closing yields workflow first")
+                exit(1)
+            
+            # Load the closing yields data
+            print(f"Loading data from: {closing_yields_file}")
+            closing_yields_data = pd.read_csv(closing_yields_file)
+            
+            # Run the post-processing workflow
+            result = run_post_processing_workflow(closing_yields_data, is_weekend_mode=False)
+            
+            if result.success:
+                print("Post-processing completed successfully")
+                print("Post-processed data preview:")
+                print(result.data.head())
+            else:
+                print(f"Post-processing failed: {result.error}")
             
     except Exception as e:
-        print(f"Error: {str(e)}") 
+        print(f"Error: {str(e)}")
+        import traceback
+        print(traceback.format_exc()) 
