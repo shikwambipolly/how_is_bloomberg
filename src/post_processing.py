@@ -203,7 +203,7 @@ class PostProcessor:
             
             # Apply formula extension to the GC sheet
             logger.info("Now extending formulas in the GC sheet")
-            self.extend_gc_sheet_formulas(workbook)
+            gc_success = self.extend_gc_sheet_formulas(workbook)
             
             # Save the updated workbook
             try:
@@ -290,12 +290,15 @@ class PostProcessor:
         
         Args:
             workbook: The openpyxl workbook object
+            
+        Returns:
+            bool: True if successful, False otherwise
         """
         try:
             # Check if GC sheet exists
             if "GC" not in workbook.sheetnames:
                 logger.warning("GC sheet not found in workbook")
-                return
+                return False
                 
             gc_sheet = workbook["GC"]
             logger.info("Successfully opened 'GC' sheet")
@@ -423,9 +426,11 @@ class PostProcessor:
             
             logger.info(f"Successfully copied last row to row {target_row} in GC sheet with adjusted formulas")
             
+            return True
+            
         except Exception as e:
             logger.error(f"Error extending GC sheet: {str(e)}")
-            # Don't raise the exception - we don't want to fail the entire workflow
+            return False
     
     def save_results(self, df: pd.DataFrame) -> Path:
         """
@@ -459,6 +464,7 @@ class PostProcessor:
         2. Finds the last row with data
         3. Copies that row to a new row
         4. Updates the date column to today's date (Saturday or Sunday)
+        5. Updates the GC sheet with extended formulas
         
         Returns:
             bool: True if successful, False otherwise
@@ -513,6 +519,17 @@ class PostProcessor:
                     input_sheet.cell(row=target_row, column=1).number_format = input_sheet.cell(row=last_row, column=1).number_format
             else:
                 logger.warning(f"Date cell does not contain a valid date: {last_date}")
+            
+            # Step 2: Update the GC sheet with extended formulas
+            logger.info("Now processing GC sheet to extend formulas...")
+            
+            # Call the method to extend formulas in the GC sheet
+            gc_success = self.extend_gc_sheet_formulas(workbook)
+            
+            if not gc_success:
+                logger.warning("Could not extend GC sheet formulas, but Input sheet was updated successfully.")
+            else:
+                logger.info("Successfully extended GC sheet formulas")
             
             # Save the workbook
             workbook.save(self.excel_path)

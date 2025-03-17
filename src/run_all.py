@@ -292,6 +292,7 @@ if __name__ == "__main__":
                 body += "==============\n\n"
                 body += "✓ Post-Processing with Simplified Excel Update\n"
                 body += "  • Created new row with today's date (weekend entry)\n"
+                body += "  • Extended formulas in GC sheet\n"
                 
                 # Send the status email
                 send_workflow_email(subject, body)
