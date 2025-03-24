@@ -10,7 +10,7 @@ from config import Config
 from typing import Optional
 import pandas as pd
 from workflow_result import WorkflowResult
-
+from public_holidays import is_public_holiday
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
@@ -270,9 +270,11 @@ def process_collected_data(collector: DataCollector):
 if __name__ == "__main__":
     # Check if today is a weekend day
     is_weekend = datetime.now().weekday() >= 5
+    is_public_holiday = is_public_holiday(datetime.now())
     
-    if is_weekend:
-        logging.info("Weekend detected - running only simplified post-processing")
+    
+    if is_weekend or is_public_holiday:
+        logging.info("Weekend or public holiday detected - running only simplified post-processing")
         
         try:
             # Run post-processing workflow in weekend mode (no data needed)
